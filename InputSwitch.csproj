@@ -25,4 +25,11 @@
     <Using Include="System.IO" />
   </ItemGroup>
 
+  <!-- Developer tools have their own projects. -->
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+    <Page Remove="tools/**" />
+  </ItemGroup>
+
 </Project>

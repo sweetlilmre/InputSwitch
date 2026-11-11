@@ -161,14 +161,16 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         var fingerprint = ProfileMatcher.Fingerprint(_connected);
         if (fingerprint.Count == 0)
         {
-            Info("No external monitors are connected.");
+            Alert(DialogIcon.Info, "No external monitors connected",
+                "Connect the monitors for this setup, then try again. The laptop's own screen doesn't count.");
             return;
         }
 
         var existing = _config.Profiles.FirstOrDefault(p => p.MonitorIds.SetEquals(fingerprint));
         if (existing is not null &&
-            !Ask($"\"{existing.Name}\" already covers exactly these monitors. Create another configuration anyway?\n\n" +
-                 "(When two configurations match, the first one in the list is used.)"))
+            !FluentDialog.Confirm(this, DialogIcon.Question, "Create another configuration?",
+                $"\"{existing.Name}\" already covers exactly these monitors. When two configurations match, the first one in the list is used.",
+                "Create anyway"))
             return;
 
         var profile = ProfileMatcher.CreateFor(_connected, _config);
@@ -182,10 +184,13 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     private void OnDeleteProfile(object sender, RoutedEventArgs e)
     {
         if (SelectedProfile is not { } p) return;
+        var hotkeys = p.Bindings.Count == 1 ? "its hotkey" : $"its {p.Bindings.Count} hotkeys";
         var note = IsConnectedProfile(p)
-            ? "\n\nThis setup is connected now, so a fresh, empty configuration will be created for it when you save."
+            ? " This setup is connected now, so a fresh, empty configuration will be created for it when you save."
             : "";
-        if (!Ask($"Delete \"{p.Name}\" and its {p.Bindings.Count} hotkey(s)?{note}", MessageBoxImage.Warning)) return;
+        if (!FluentDialog.Confirm(this, DialogIcon.Warning, $"Delete \"{p.Name}\"?",
+                $"The configuration and {hotkeys} will be removed.{note}", "Delete"))
+            return;
 
         _config.Profiles.Remove(p);
         _dirty = true;
@@ -217,7 +222,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         var missing = _connected.Where(m => !m.IsInternal && !ids.Contains(m.Id)).ToList();
         if (missing.Count == 0)
         {
-            Info("All connected external monitors are already in this configuration.");
+            Alert(DialogIcon.Info, "Nothing to add", "All the connected monitors are already in this configuration.");
             return;
         }
 
@@ -235,8 +240,10 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         if (SelectedProfile is not { } p || (sender as FrameworkElement)?.Tag is not MonitorRow row) return;
         var m = row.Monitor;
         int used = p.Bindings.Count(b => b.MonitorId == m.MonitorId);
-        if (!Ask($"Remove {m.Name} from \"{p.Name}\"{(used > 0 ? $" along with its {used} hotkey(s)" : "")}?\n\n" +
-                 "The configuration is recognised by its monitors, so removing one changes which setups it matches."))
+        var alsoHotkeys = used switch { 0 => "", 1 => " Its hotkey will be removed too.", _ => $" Its {used} hotkeys will be removed too." };
+        if (!FluentDialog.Confirm(this, DialogIcon.Warning, $"Remove {m.Name}?",
+                $"Configurations are recognised by their monitors, so this changes which setups \"{p.Name}\" matches.{alsoHotkeys}",
+                "Remove"))
             return;
 
         p.Monitors.Remove(m);
@@ -315,7 +322,8 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         if (SelectedProfile is not { } p) return;
         if (p.Monitors.Count == 0)
         {
-            Info("This configuration has no monitors.");
+            Alert(DialogIcon.Info, "No monitors in this configuration",
+                "Connect a monitor and use Add connected before adding a hotkey.");
             return;
         }
 
@@ -402,7 +410,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         }
         catch (Exception ex)
         {
-            Info($"Could not change the startup setting: {ex.Message}", MessageBoxImage.Warning);
+            Alert(DialogIcon.Warning, "Couldn't change Start with Windows", ex.Message);
         }
 
         Saved?.Invoke(_config);
@@ -414,20 +422,17 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     {
         if (_dirty && !_saved)
         {
-            var answer = MessageBox.Show(this, "Save your changes?", Title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (answer == MessageBoxResult.Cancel) { e.Cancel = true; return; }
-            if (answer == MessageBoxResult.Yes) ApplySave();
+            var answer = FluentDialog.Show(this, DialogIcon.Question, "Save your changes?",
+                "You've changed your configurations. Save before closing?", "Save", "Don't save", "Cancel");
+            if (answer == DialogChoice.Cancel) { e.Cancel = true; return; }
+            if (answer == DialogChoice.Primary) ApplySave();
         }
         base.OnClosing(e);
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private void Info(string text, MessageBoxImage image = MessageBoxImage.Information) =>
-        MessageBox.Show(this, text, Title, MessageBoxButton.OK, image);
-
-    private bool Ask(string text, MessageBoxImage image = MessageBoxImage.Question) =>
-        MessageBox.Show(this, text, Title, MessageBoxButton.YesNo, image) == MessageBoxResult.Yes;
+    private void Alert(DialogIcon icon, string heading, string message) => FluentDialog.Show(this, icon, heading, message);
 
     internal static BitmapSource CreateWindowIcon()
     {

@@ -20,8 +20,8 @@ internal static class Program
         using var mutex = new Mutex(initiallyOwned: true, @"Local\InputSwitch-6d3f0b8e", out bool isFirst);
         if (!isFirst)
         {
-            MessageBox.Show("InputSwitch is already running — look for its icon in the notification area.",
-                "InputSwitch", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UI.AppDialogs.Alert(UI.DialogIcon.Info, "InputSwitch is already running",
+                "Look for its icon in the notification area. Click it to open the settings.");
             return;
         }
 

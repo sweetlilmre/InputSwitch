@@ -1,46 +1,150 @@
 # InputSwitch
 
-A small Windows tray app that switches monitor inputs (DisplayPort, HDMI, USB-C, DVI, …) with global hotkeys. It sends the VESA MCCS "input source" command (VCP 0x60) over DDC/CI, the mechanism monitor utilities such as Dell Display Manager use, so it works with most monitors from Dell, LG, Samsung, HP, Lenovo, BenQ, ASUS and others. It has no dependencies beyond .NET 10.
+**Switch your monitors between inputs with a keyboard shortcut, and have the right shortcuts ready wherever you plug your laptop in.**
 
-Not every monitor plays along: some models (notably some LGs) use non-standard input codes or ignore the command, there is no standard code for USB-C (Dell uses 0x1B), and most TVs and some docks/KVMs don't pass DDC/CI through.
+Press a hotkey and your monitor jumps from DisplayPort to HDMI, or to USB-C, or to whichever input you like. No more fiddling with the buttons under the screen.
 
-## Build and run
+InputSwitch also remembers each place you work. Your desk at work and your desk at home each get their own set of hotkeys, and InputSwitch picks the right set by itself when you plug in.
 
-```
-dotnet build -c Release
-bin\Release\net10.0-windows\InputSwitch.exe
-```
+> Developers and the curious: building, internals and the settings file are covered in the [technical notes](docs/TECHNICAL.md).
 
-For a single self-contained executable: `dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true`.
+---
 
-## How it works
+## Contents
 
-- **Setups are recognised by their monitors.** Each monitor is identified by its EDID manufacturer, model and serial number, so it is recognised whichever dock or port it is plugged into. The laptop's built-in panel is ignored, so opening or closing the lid does not count as a different setup.
-- **First run / new place.** When the connected external monitors don't match any configuration, a new one is created automatically and starts **disabled**. On the very first run the configuration window opens; after that you get a notification you can click.
-- **Hardware changes** (docking, undocking, plugging in a monitor, resume from sleep, unlock) are detected, and after a short settling delay the matching configuration is activated and its hotkeys are registered.
-- **A monitor that disappears** after being switched to another input (or turned off) doesn't change the setup: a configuration still matches when some of its monitors are missing.
-- **Hotkeys.** Each hotkey belongs to one monitor and lists one or more inputs. With one input it switches to that input. With two it toggles between them. With more it cycles through them in order. The current input is read from the monitor to decide which input comes next.
+- [Before you start](#before-you-start)
+- [Getting started](#getting-started)
+- [Work, home and anywhere else](#work-home-and-anywhere-else)
+- [The settings window](#the-settings-window)
+- [Making a hotkey](#making-a-hotkey)
+- [The tray icon](#the-tray-icon)
+- [Notifications](#notifications)
+- [Something not working?](#something-not-working)
+- [Your settings and uninstalling](#your-settings-and-uninstalling)
 
-## Configuration window
+---
 
-Open it by left-clicking the tray icon, by right-clicking the icon and choosing **Configure…**, or by starting the app with `InputSwitch.exe --settings`. The windows use WPF's built-in Windows 11 (Fluent) theme and follow the Windows light/dark setting; the tray, hotkeys and display detection run on WinForms, and WPF is only loaded when a window is opened.
+## Before you start
 
-- **Configurations** (left): one per setup, e.g. rename "Setup 1" to "Work". **New from current setup** creates another one by hand.
-- **Enabled**: hotkeys are only registered while the configuration is enabled and its setup is connected. Adding the first hotkey enables it.
-- **Monitors**: rename monitors (e.g. "Left Dell"), **Detect inputs** reads the inputs each monitor supports, **Add connected monitors** / **Remove** changes which monitors make up the setup.
-- **Hotkeys**: **Add…** picks a monitor, a key combination (it needs Ctrl, Alt or Win, or one of F13–F24) and the inputs. **Test** runs the action straight away.
+You'll need:
 
-Hotkeys are released while the window is open, so you can record combinations that are already assigned.
+- **Windows 10 or 11.** It looks its best on Windows 11.
+- **The .NET 10 Desktop Runtime**, a free download from Microsoft. Your IT team may have already installed it.
+- **Monitors that accept commands from your computer.** Most Dell, LG, Samsung, HP, Lenovo, BenQ and ASUS monitors do. The feature is called **DDC/CI** and is usually on already. If not, look for it in the monitor's on-screen menu (on Dell monitors it's under **Others**).
 
-The right-click menu also lists the active hotkeys and has a **Switch … to** submenu for each monitor for one-off switches, plus **Start with Windows**.
+It usually won't work with TVs, or through some docks, KVM switches and adapters. Plugging the monitor in directly often fixes that.
 
-## Files
+## Getting started
 
-- Configuration: `%APPDATA%\InputSwitch\config.json`
-- Diagnostics: `InputSwitch.exe --diagnose` writes a read-only report (monitors, ids, current input, DDC/CI capabilities, matching configuration) and opens it in Notepad. It never changes an input.
+1. **Run `InputSwitch.exe`.** It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
+2. **Give it a name.** Click *Setup 1* at the top and type something like `Work`.
+3. **Add a hotkey.** Click **Add hotkey**, choose a monitor, click the *Key combination* box and press the keys you want, for example **Ctrl + Alt + M**. Then tick the inputs, for example **DisplayPort 1** and **HDMI 1**, and click **Save**.
+4. **Try it.** Click the ▷ button next to your new hotkey.
+5. **Click Save.** That's it. Press your hotkey from anywhere in Windows.
 
-## Troubleshooting
+> **Tip:** before you try a hotkey, make sure something is plugged into the input you're switching to. Otherwise the screen shows "No signal" until you switch back.
 
-- **"did not accept the switch" / "no DDC/CI reply"**: enable DDC/CI in the monitor's on-screen menu (on Dell monitors it's under Others → DDC/CI; other brands have a similar setting). Some docks and KVMs don't pass DDC/CI through.
-- **An input isn't listed**: some monitors report an incomplete capabilities list. In the hotkey editor, enter the code under "Other input code" (MCCS VCP 0x60 values: 0x03 DVI 1, 0x0F DisplayPort 1, 0x11 HDMI 1, 0x12 HDMI 2; Dell uses 0x1B for USB-C).
-- **Switching back from the other input does nothing**: once a monitor shows another input, whether it still answers DDC/CI on the inactive cable depends on the model. Most Dells do; try it with yours.
+To have InputSwitch start every time you sign in, tick **Start with Windows**.
+
+## Work, home and anywhere else
+
+InputSwitch recognises your monitors individually, even two of the same model, so it always knows which desk you're at.
+
+- **The first time you plug in somewhere new,** InputSwitch notices and makes a new configuration. Click the notification, give it a name like `Home`, and add your hotkeys. You can use the same key combinations as at work.
+- **From then on,** just plug in. The right hotkeys switch on by themselves.
+- **Closing your laptop lid** doesn't confuse it. Neither does switching a monitor off, or switching it over to another computer.
+- **Away from a desk,** with no monitors plugged in, nothing is active.
+
+## The settings window
+
+**Click the tray icon** to open it.
+
+- **On the left** are your configurations, such as *Work* and *Home*. The one you're plugged into now is highlighted.
+- **At the top** is the configuration's name (click it to rename it), and a coloured banner:
+  - **Green** means you're plugged into this setup and its hotkeys are working.
+  - **Amber** means you're plugged in but **Hotkeys on** is unticked.
+  - **Grey** means this setup isn't plugged in right now.
+- **Monitors** shows each monitor with the inputs it has. The highlighted one is the input it's showing now. You can rename a monitor, for example to `Left screen`.
+  - **Detect inputs** checks again which inputs your monitors have.
+  - **Add connected** adds a newly plugged-in monitor to this configuration.
+- **Hotkeys** lists your hotkeys. Use ▷ to try one, ✎ to change it, or 🗑 to remove it.
+- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, and **Save / Cancel**.
+
+Your hotkeys take a break while the settings window is open, so you can't switch a screen by accident. They come back when you close it.
+
+## Making a hotkey
+
+Each hotkey controls one monitor. What it does depends on how many inputs you tick:
+
+| Tick | Pressing the hotkey… |
+|---|---|
+| One input | switches to it |
+| Two inputs | flips between them |
+| Three or more | steps through them in order |
+
+When choosing keys:
+
+- Use **Ctrl**, **Alt** or the **Windows key** with a letter or number, for example **Ctrl + Alt + M**.
+- **Backspace** clears the box if you change your mind.
+- Some **Windows key** combinations are taken by Windows itself. If yours doesn't work, pick another.
+
+Use the ▲ ▼ buttons to change the order when stepping through three or more inputs.
+
+## The tray icon
+
+InputSwitch sits in the notification area as a small blue monitor with two arrows. If you can't see it, click the **^** arrow next to the clock.
+
+- **Click it** to open the settings window.
+- **Right-click it** for a menu where you can:
+  - run any of your hotkeys,
+  - switch a monitor to any input as a one-off,
+  - turn **Start with Windows** on or off,
+  - **Exit**.
+
+## Notifications
+
+InputSwitch pops up a short message when:
+
+- you plug into a **new setup**. Click it to set the setup up.
+- you plug into a **known setup**, for example "Display setup: Home". You can turn these off with **Notify when the setup changes**.
+- something needs your attention, for example a hotkey another app is already using, or a monitor that didn't respond.
+
+## Something not working?
+
+**The monitor didn't switch**
+
+- Check **DDC/CI** is on in the monitor's on-screen menu.
+- If you use a dock or adapter, try plugging the monitor in directly.
+- Open the settings window and click **Detect inputs**. If no inputs appear, the monitor isn't listening to the computer.
+
+**My hotkey does nothing**
+
+- Right-click the tray icon. Does it show the right setup? If it says *(disabled)*, open the settings and tick **Hotkeys on**.
+- Another app might already use that key combination. Try a different one.
+- Hotkeys pause while the settings window is open.
+
+**It can't switch back**
+
+Some monitors stop listening to your computer while they're showing a different input. Use the monitor's own buttons to switch back.
+
+**An input I need isn't listed**
+
+Some monitors don't list every input. The [technical notes](docs/TECHNICAL.md#input-codes-reference) explain how to add one by its code.
+
+**It made a new configuration I didn't expect**
+
+That happens when you plug in a monitor it hasn't seen before. Either set up the new configuration, or delete it and use **Add connected** in your usual one.
+
+Still stuck? The [technical notes](docs/TECHNICAL.md#command-line-options) describe a diagnostic report you can send to whoever supports you.
+
+## Your settings and uninstalling
+
+Your settings are saved automatically. Right-click the tray icon and choose **Open config folder** to see where. Copy that folder to keep a backup.
+
+InputSwitch doesn't connect to the internet or send anything anywhere.
+
+**To uninstall:**
+
+1. Untick **Start with Windows**.
+2. Right-click the tray icon and choose **Exit**.
+3. Delete the InputSwitch folder, and the settings folder too if you don't want to keep your settings.

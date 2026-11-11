@@ -85,7 +85,8 @@ internal sealed partial class BindingEditorWindow : Window
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) text = text[2..];
         if (!int.TryParse(text, NumberStyles.HexNumber, null, out int code) || code is < 1 or > 0xFF)
         {
-            Warn("Enter an input code between 01 and FF in hex.");
+            FluentDialog.Show(this, DialogIcon.Warning, "Not a valid input code",
+                "Enter a hexadecimal code between 01 and FF, for example 1B.");
             return;
         }
 
@@ -129,7 +130,7 @@ internal sealed partial class BindingEditorWindow : Window
 
         if (problem is not null)
         {
-            Warn(problem);
+            FluentDialog.Show(this, DialogIcon.Warning, "This hotkey isn't finished", problem);
             return;
         }
 
@@ -142,6 +143,4 @@ internal sealed partial class BindingEditorWindow : Window
         };
         DialogResult = true;
     }
-
-    private void Warn(string text) => MessageBox.Show(this, text, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
 }

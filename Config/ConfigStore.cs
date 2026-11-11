@@ -1,5 +1,3 @@
-using System.Drawing;
-using System.Windows.Forms;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -30,8 +28,8 @@ internal static class ConfigStore
         {
             // Keep the unreadable file for inspection rather than silently overwriting it.
             try { File.Copy(FilePath, FilePath + ".bad", overwrite: true); } catch { }
-            MessageBox.Show($"Could not read {FilePath}:\n{ex.Message}\n\nA copy was saved as config.json.bad and a fresh configuration will be used.",
-                "InputSwitch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            UI.AppDialogs.Alert(UI.DialogIcon.Warning, "Your settings couldn't be read",
+                $"{ex.Message}\n\nInputSwitch will start with fresh settings. The unreadable file was kept as config.json.bad in {Directory}.");
         }
         return new AppConfig();
     }
