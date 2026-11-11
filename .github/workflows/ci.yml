@@ -1,12 +1,14 @@
 # Builds InputSwitch, runs the smoke tests, and on main packages the release files.
 #
-# Pull requests to main: build and smoke test (make "Build and smoke test" a required status check
-# so a PR can't merge until it passes; see docs/TECHNICAL.md).
+# One job, so each binary is built once and the files that are tested are the files that ship:
+#   1. logic smoke tests;
+#   2. publish the x64 full and slim single-file builds and launch-test both;
+#   3. on pushes to main only: publish the Arm64 builds, zip all four with checksums, and keep
+#      them as the "release-files" artifact. Tagging that commit vX.Y.Z publishes exactly those
+#      files; the release workflow doesn't rebuild anything.
 #
-# Pushes to main (i.e. merges): the same, then the "Package release files" job builds the full and
-# slim zips for x64 and Arm64, launch-tests the x64 builds, and keeps them on the run as the
-# "release-files" artifact. Tagging that commit vX.Y.Z publishes exactly those files; the release
-# workflow doesn't rebuild anything.
+# Make "Build and smoke test" a required status check so a PR can't merge until it passes
+# (see docs/TECHNICAL.md).
 
 name: CI
 
@@ -25,10 +27,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  smoke:
+  build:
     name: Build and smoke test
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      # Package release files only for pushes to main.
+      PACKAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     steps:
       - name: Check out
@@ -38,78 +43,55 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-
-      - name: Build
-        run: dotnet build InputSwitch.csproj -c Release -p:ContinuousIntegrationBuild=true
 
       - name: Logic smoke tests
-        run: dotnet run -c Release --project tests/InputSwitch.SmokeTests
+        run: dotnet run -c Release --project tests/InputSwitch.SmokeTests -p:ContinuousIntegrationBuild=true
 
-      - name: Launch smoke test
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe bin/Release/net10.0-windows/InputSwitch.exe
-
-      # On main the package job does the real publish; on PRs, just check publishing still works.
-      - name: Check a release build publishes
-        if: github.event_name != 'push'
-        run: >
-          dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -o publish-check
-
-  package:
-    name: Package release files
-    needs: smoke
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: windows-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
-      - name: Build release files
+      - name: Publish
         shell: pwsh
         run: |
-          $version = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
-          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true')
-          New-Item -ItemType Directory -Force dist | Out-Null
-
           # Two single-file builds per architecture:
           #   full - .NET runtime built in, nothing else to install (large)
           #   slim - uses the installed .NET 10 Desktop Runtime (small)
-          foreach ($rid in 'win-x64', 'win-arm64') {
+          # Arm64 is only needed for release files, so it's skipped on pull requests.
+          $rids = if ($env:PACKAGE -eq 'true') { 'win-x64', 'win-arm64' } else { 'win-x64' }
+          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true', '-p:PublishSingleFile=true')
+          foreach ($rid in $rids) {
             foreach ($flavour in 'full', 'slim') {
               $runtime = if ($flavour -eq 'full') {
                 @('--self-contained', '-p:IncludeNativeLibrariesForSelfExtract=true')
               } else {
                 @('--self-contained', 'false')
               }
-              dotnet publish InputSwitch.csproj @common -r $rid @runtime -p:PublishSingleFile=true -o "out/$rid-$flavour"
+              dotnet publish InputSwitch.csproj @common -r $rid @runtime -o "out/$rid-$flavour"
               if ($LASTEXITCODE) { exit $LASTEXITCODE }
-              Compress-Archive -Path "out/$rid-$flavour/*" -DestinationPath "dist/InputSwitch-$version-$rid-$flavour.zip"
             }
           }
 
+      - name: Launch smoke test (x64 full)
+        shell: pwsh
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
+
+      - name: Launch smoke test (x64 slim)
+        shell: pwsh
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
+
+      - name: Zip release files
+        if: env.PACKAGE == 'true'
+        shell: pwsh
+        run: |
+          $version = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
+          New-Item -ItemType Directory -Force dist | Out-Null
+          foreach ($dir in Get-ChildItem out -Directory) {
+            Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist/InputSwitch-$version-$($dir.Name).zip"
+          }
           Get-ChildItem dist/*.zip | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Set-Content dist/SHA256SUMS.txt
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: Smoke-test the full x64 build
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
-
-      - name: Smoke-test the slim x64 build
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
-
       - name: Keep the release files
+        if: env.PACKAGE == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: release-files

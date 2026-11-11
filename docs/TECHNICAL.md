@@ -53,7 +53,7 @@ Releases are **built once**. Every merge to `main` packages the release files, a
 **To cut a release:**
 
 1. In a pull request, bump `<VersionPrefix>` (e.g. `0.1.0` → `0.2.0`) and merge it once CI passes.
-2. Wait for CI on `main` to finish for the merge commit, including its **Package release files** job.
+2. Wait for CI on `main` to pass for the merge commit.
 3. Tag the merge commit and push the tag:
    ```
    git checkout main && git pull
@@ -63,11 +63,7 @@ Releases are **built once**. Every merge to `main` packages the release files, a
 
 Tags must be plain `vMAJOR.MINOR.PATCH`. The release is a full release marked **Latest**. To make one a pre-release, edit it on GitHub afterwards and tick **Set as a pre-release**. Suffixed tags such as `v0.2.0-beta.1` are refused, because the version is built into the files when they land on `main`, before any tag exists.
 
-**On every push to `main`**, the CI workflow's **Package release files** job:
-
-1. publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and zips each, with `SHA256SUMS.txt`;
-2. runs the launch smoke test against both x64 builds (full and slim);
-3. keeps the files on the run as the `release-files` artifact for **90 days**.
+**On every push to `main`**, CI (see [Smoke tests and CI](#smoke-tests-and-ci)) publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and launch-tests both x64 builds. It then zips all four with `SHA256SUMS.txt`, and keeps them on the run as the `release-files` artifact for **90 days**.
 
 **On a version tag**, the **Release** workflow (`.github/workflows/release.yml`):
 
@@ -106,13 +102,13 @@ There are two layers of smoke tests. Neither needs monitors, and neither changes
 
 The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
 
-The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. On `windows-latest`, the **Build and smoke test** job:
+The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It's a single job, **Build and smoke test**, on `windows-latest`. Each binary is built once, and the launch tests run against the files that ship:
 
-1. builds the app;
-2. runs both smoke-test layers;
-3. on pull requests, checks a single-file release build still publishes.
+1. runs the logic smoke tests;
+2. publishes the **x64 full** and **x64 slim** single-file builds and launch-tests both;
+3. on pushes to `main` only: also publishes the Arm64 builds, zips all four with checksums, and keeps them as the `release-files` artifact (see [Versioning and releases](#versioning-and-releases)).
 
-On pushes to `main`, the **Package release files** job then builds and keeps the release files (see [Versioning and releases](#versioning-and-releases)). Apart from those files, nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
+Pull requests skip step 3, which takes a while. Apart from the release files, nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
 
 **Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
 
