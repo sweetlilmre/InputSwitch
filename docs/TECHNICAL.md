@@ -48,24 +48,40 @@ The running app locks `InputSwitch.exe`, so exit it from the tray before rebuild
 
 The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. The SDK derives the assembly and file versions from it, and appends the git commit to the informational version, e.g. `0.1.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the settings window's left-hand pane, and in the diagnostic report (`AppInfo.cs`).
 
+Releases are **built once**. Every merge to `main` packages the release files, and tagging that commit publishes exactly those files, with nothing rebuilt.
+
 **To cut a release:**
 
 1. In a pull request, bump `<VersionPrefix>` (e.g. `0.1.0` → `0.2.0`) and merge it once CI passes.
-2. Tag the merge commit on `main` and push the tag:
+2. Wait for CI on `main` to finish for the merge commit, including its **Package release files** job.
+3. Tag the merge commit and push the tag:
    ```
    git checkout main && git pull
-   git tag v1.1.0
-   git push origin v1.1.0
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
-   A tag with a suffix, e.g. `v1.1.0-beta.1`, makes a **pre-release** (the suffix becomes the version suffix). Any other tag, including 0.x versions, makes a full release marked **Latest**.
 
-The **Release** workflow (`.github/workflows/release.yml`) then:
+Tags must be plain `vMAJOR.MINOR.PATCH`. The release is a full release marked **Latest**. To make one a pre-release, edit it on GitHub afterwards and tick **Set as a pre-release**. Suffixed tags such as `v0.2.0-beta.1` are refused, because the version is built into the files when they land on `main`, before any tag exists.
 
-1. runs the full CI smoke tests;
-2. checks the tag matches `VersionPrefix`, and stops with an error if it doesn't;
-3. publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and zips each;
-4. runs the launch smoke test against both x64 builds (full and slim), the exact files being shipped;
+**On every push to `main`**, the CI workflow's **Package release files** job:
+
+1. publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and zips each, with `SHA256SUMS.txt`;
+2. runs the launch smoke test against both x64 builds (full and slim);
+3. keeps the files on the run as the `release-files` artifact for **90 days**.
+
+**On a version tag**, the **Release** workflow (`.github/workflows/release.yml`):
+
+1. checks the tag is `vMAJOR.MINOR.PATCH` and matches `VersionPrefix`;
+2. finds the successful CI run on `main` for the tagged commit, and stops if there isn't one;
+3. downloads that run's `release-files`;
+4. checks all four zips are present, the checksums match, and each exe's version stamp is exactly `<version>+<tagged commit>`;
 5. creates the GitHub release with generated release notes, the zips and `SHA256SUMS.txt`.
+
+This takes about a minute. If it stops, the error says why. The usual causes are:
+
+- **Tagging a commit that isn't on `main`:** tag the merge commit instead.
+- **Tagging before CI on `main` has finished:** delete the tag and tag again once CI has passed.
+- **Release files older than 90 days:** push a new commit to `main` and tag that.
 
 | Release file | For |
 |---|---|
@@ -75,7 +91,7 @@ The **Release** workflow (`.github/workflows/release.yml`) then:
 | `InputSwitch-<version>-win-arm64-slim.zip` | Arm laptops with the .NET 10 Desktop Runtime. |
 | `SHA256SUMS.txt` | Checksums for the zips. |
 
-If a release run fails after the tag is pushed, fix the problem, delete the tag (`git push --delete origin v1.1.0` and `git tag -d v1.1.0`), and tag again.
+To redo a release, delete the release and its tag (`gh release delete v0.2.0 --cleanup-tag --yes` and `git tag -d v0.2.0`), then tag again.
 
 Keep the repository private or internal to the company's GitHub organisation, so releases are only visible to colleagues. Check with the AI Engineering team before making it more widely available.
 
@@ -90,14 +106,13 @@ There are two layers of smoke tests. Neither needs monitors, and neither changes
 
 The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
 
-The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It does four things on `windows-latest`:
+The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. On `windows-latest`, the **Build and smoke test** job:
 
 1. builds the app;
 2. runs both smoke-test layers;
-3. checks a single-file release build publishes;
-4. is also called by the Release workflow before anything is published.
+3. on pull requests, checks a single-file release build still publishes.
 
-Nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
+On pushes to `main`, the **Package release files** job then builds and keeps the release files (see [Versioning and releases](#versioning-and-releases)). Apart from those files, nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
 
 **Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
 

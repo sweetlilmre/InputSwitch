@@ -17,9 +17,10 @@
     <Description>Tray utility that switches monitor inputs over DDC/CI with per-setup hotkeys.</Description>
     <!--
       The app version. This is the single source of truth: bump it in the change that prepares a
-      release, then tag that commit vX.Y.Z (or vX.Y.Z-suffix for a pre-release). The release
-      workflow refuses a tag that doesn't match. AssemblyVersion/FileVersion derive from it, and
-      the SDK appends the git commit to the informational version (e.g. 0.1.0+7c86e8a…).
+      release, merge to main, then tag that commit vX.Y.Z. The release workflow refuses a tag that
+      doesn't match, and publishes the files CI built for that commit. AssemblyVersion/FileVersion
+      derive from it, and the SDK appends the git commit to the informational version
+      (e.g. 0.1.0+7c86e8a…).
     -->
     <VersionPrefix>0.1.0</VersionPrefix>
   </PropertyGroup>

@@ -1,11 +1,12 @@
-# Cuts a GitHub release when a version tag is pushed.
+# Publishes a GitHub release when a version tag is pushed. Nothing is rebuilt: the release is made
+# from the files CI built and tested when that commit landed on main.
 #
-#   1. Bump <VersionPrefix> in InputSwitch.csproj and merge that to main.
+#   1. Bump <VersionPrefix> in InputSwitch.csproj and merge that to main; wait for CI to pass.
 #   2. Tag the merge commit:  git tag v1.2.0 && git push origin v1.2.0
-#      (a tag with a suffix, e.g. v1.2.0-beta.1, makes a pre-release)
 #
-# The tag must match VersionPrefix. The smoke tests run first, then the release build itself is
-# smoke-tested, and only then is the release created.
+# The tag must be vMAJOR.MINOR.PATCH and match VersionPrefix, and the tagged commit must have a
+# successful CI run on main whose release files haven't expired (they're kept for 90 days).
+# To mark a release as a pre-release, edit it on GitHub after it's published.
 
 name: Release
 
@@ -17,26 +18,17 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: Smoke test
-    uses: ./.github/workflows/ci.yml
-
   release:
-    name: Build and publish release
-    needs: smoke
-    runs-on: windows-latest
-    timeout-minutes: 30
+    name: Publish release
+    runs-on: windows-latest   # reading the exe's version stamp needs Windows
+    timeout-minutes: 15
     permissions:
       contents: write   # create the release and upload its files
+      actions: read     # find the CI run and download its files
 
     steps:
       - name: Check out
         uses: actions/checkout@v7
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
 
       - name: Check the tag matches the project version
         id: version
@@ -44,62 +36,80 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          if ($env:TAG -notmatch '^v(?<prefix>\d+\.\d+\.\d+)(?:-(?<suffix>[0-9A-Za-z][0-9A-Za-z.-]*))?$') {
-            Write-Output "::error::Tag '$env:TAG' isn't vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-suffix."
+          if ($env:TAG -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+            Write-Output "::error::Tag '$env:TAG' isn't vMAJOR.MINOR.PATCH (e.g. v1.2.0). Suffixed tags aren't supported: mark a release as a pre-release on GitHub instead."
             exit 1
           }
-          $prefix = $Matches.prefix
-          $suffix = $Matches.suffix
+          $version = $Matches.version
           $project = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
-          if ($project -ne $prefix) {
+          if ($project -ne $version) {
             Write-Output "::error::Tag $env:TAG doesn't match <VersionPrefix>$project</VersionPrefix> in InputSwitch.csproj. Bump VersionPrefix (or fix the tag) and tag again."
             exit 1
           }
-          $version = if ($suffix) { "$prefix-$suffix" } else { $prefix }
-          "version=$version"                          >> $env:GITHUB_OUTPUT
-          "suffix=$suffix"                            >> $env:GITHUB_OUTPUT
-          # Only a suffixed tag (v1.2.0-beta.1) is published as a pre-release.
-          "prerelease=$(([bool]$suffix).ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          Write-Output "Releasing InputSwitch $version"
+          $commit = git rev-parse "$env:TAG^{commit}"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "commit=$commit"   >> $env:GITHUB_OUTPUT
+          Write-Output "Releasing InputSwitch $version from commit $commit"
 
-      - name: Build release files
+      - name: Find the CI run for this commit
+        id: ci
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          $run = gh run list --workflow ci.yml --branch main --event push --commit $env:COMMIT `
+            --status success --limit 1 --json databaseId,url | ConvertFrom-Json | Select-Object -First 1
+          if (-not $run) {
+            Write-Output "::error::No successful CI run on main for commit $env:COMMIT. Tag a commit that has been merged or pushed to main, and wait for its CI run to pass."
+            exit 1
+          }
+          "run-id=$($run.databaseId)" >> $env:GITHUB_OUTPUT
+          Write-Output "Using release files from $($run.url)"
+
+      - name: Download the release files
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.ci.outputs.run-id }}
+        run: |
+          gh run download $env:RUN_ID --name release-files --dir dist
+          if ($LASTEXITCODE) {
+            Write-Output "::error::Couldn't download the release files from CI run $env:RUN_ID. They may have expired (they're kept for 90 days); push a new commit to main and tag that."
+            exit 1
+          }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Check the files are this version and commit
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          SUFFIX: ${{ steps.version.outputs.suffix }}
+          COMMIT: ${{ steps.version.outputs.commit }}
         run: |
-          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true')
-          if ($env:SUFFIX) { $common += "-p:VersionSuffix=$env:SUFFIX" }
-          New-Item -ItemType Directory -Force dist | Out-Null
+          Push-Location dist
+          $expected = foreach ($rid in 'win-x64', 'win-arm64') { foreach ($f in 'full', 'slim') { "InputSwitch-$env:VERSION-$rid-$f.zip" } }
+          $missing = $expected | Where-Object { -not (Test-Path $_) }
+          if ($missing) { Write-Output "::error::Release files missing: $($missing -join ', ')"; exit 1 }
 
-          # Two single-file builds per architecture:
-          #   full - .NET runtime built in, nothing else to install (large)
-          #   slim - uses the installed .NET 10 Desktop Runtime (small)
-          foreach ($rid in 'win-x64', 'win-arm64') {
-            foreach ($flavour in 'full', 'slim') {
-              $runtime = if ($flavour -eq 'full') {
-                @('--self-contained', '-p:IncludeNativeLibrariesForSelfExtract=true')
-              } else {
-                @('--self-contained', 'false')
-              }
-              dotnet publish InputSwitch.csproj @common -r $rid @runtime -p:PublishSingleFile=true -o "out/$rid-$flavour"
-              if ($LASTEXITCODE) { exit $LASTEXITCODE }
-              Compress-Archive -Path "out/$rid-$flavour/*" -DestinationPath "dist/InputSwitch-$env:VERSION-$rid-$flavour.zip"
-            }
+          # Checksums written by CI must still match.
+          foreach ($line in Get-Content SHA256SUMS.txt) {
+            $hash, $name = $line -split '\s+', 2
+            if ((Get-FileHash $name -Algorithm SHA256).Hash.ToLower() -ne $hash) { Write-Output "::error::Checksum mismatch for $name"; exit 1 }
           }
 
-          Get-ChildItem dist/*.zip | ForEach-Object {
-            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
-          } | Set-Content dist/SHA256SUMS.txt
-          Get-ChildItem dist | Format-Table Name, Length
-
-      - name: Smoke-test the full x64 build
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
-
-      - name: Smoke-test the slim x64 build
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
+          # The version stamped into each exe must be this version and this commit.
+          foreach ($zip in $expected) {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid())
+            Expand-Archive $zip $tmp
+            $stamp = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $tmp 'InputSwitch.exe')).ProductVersion
+            if ($stamp -ne "$env:VERSION+$env:COMMIT") {
+              Write-Output "::error::$zip contains version '$stamp', expected '$env:VERSION+$env:COMMIT'."
+              exit 1
+            }
+            Write-Output "$zip  $stamp"
+            Remove-Item -Recurse -Force $tmp
+          }
+          Pop-Location
 
       - name: Create the GitHub release
         shell: pwsh
@@ -107,10 +117,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           $files = (Get-ChildItem dist/*).FullName
-          $options = @('--title', "InputSwitch $env:VERSION", '--generate-notes', '--verify-tag')
-          if ($env:PRERELEASE -eq 'true') { $options += '--prerelease' }
-          gh release create $env:TAG @files @options
+          gh release create $env:TAG @files --title "InputSwitch $env:VERSION" --generate-notes --verify-tag
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

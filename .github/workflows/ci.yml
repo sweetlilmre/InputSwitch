@@ -1,8 +1,12 @@
-# Builds InputSwitch and runs the smoke tests.
+# Builds InputSwitch, runs the smoke tests, and on main packages the release files.
 #
-# Runs on every pull request to main (make "Build and smoke test" a required status check so a PR
-# can't merge until it passes; see docs/TECHNICAL.md), on pushes to main, on demand, and from the
-# release workflow before anything is published.
+# Pull requests to main: build and smoke test (make "Build and smoke test" a required status check
+# so a PR can't merge until it passes; see docs/TECHNICAL.md).
+#
+# Pushes to main (i.e. merges): the same, then the "Package release files" job builds the full and
+# slim zips for x64 and Arm64, launch-tests the x64 builds, and keeps them on the run as the
+# "release-files" artifact. Tagging that commit vX.Y.Z publishes exactly those files; the release
+# workflow doesn't rebuild anything.
 
 name: CI
 
@@ -12,7 +16,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -46,8 +49,70 @@ jobs:
         shell: pwsh
         run: ./tests/launch-smoke.ps1 -Exe bin/Release/net10.0-windows/InputSwitch.exe
 
+      # On main the package job does the real publish; on PRs, just check publishing still works.
       - name: Check a release build publishes
+        if: github.event_name != 'push'
         run: >
           dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish-check
+
+  package:
+    name: Package release files
+    needs: smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Build release files
+        shell: pwsh
+        run: |
+          $version = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
+          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true')
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+          # Two single-file builds per architecture:
+          #   full - .NET runtime built in, nothing else to install (large)
+          #   slim - uses the installed .NET 10 Desktop Runtime (small)
+          foreach ($rid in 'win-x64', 'win-arm64') {
+            foreach ($flavour in 'full', 'slim') {
+              $runtime = if ($flavour -eq 'full') {
+                @('--self-contained', '-p:IncludeNativeLibrariesForSelfExtract=true')
+              } else {
+                @('--self-contained', 'false')
+              }
+              dotnet publish InputSwitch.csproj @common -r $rid @runtime -p:PublishSingleFile=true -o "out/$rid-$flavour"
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+              Compress-Archive -Path "out/$rid-$flavour/*" -DestinationPath "dist/InputSwitch-$version-$rid-$flavour.zip"
+            }
+          }
+
+          Get-ChildItem dist/*.zip | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content dist/SHA256SUMS.txt
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Smoke-test the full x64 build
+        shell: pwsh
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
+
+      - name: Smoke-test the slim x64 build
+        shell: pwsh
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
+
+      - name: Keep the release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-files
+          path: dist
+          if-no-files-found: error
+          retention-days: 90
