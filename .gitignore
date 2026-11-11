@@ -2,3 +2,9 @@ bin/
 obj/
 .vs/
 *.user
+# CI / release outputs
+smoke-out/
+smoke-release/
+publish-check/
+out/
+dist/

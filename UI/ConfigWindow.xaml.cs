@@ -38,6 +38,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
 
         InitializeComponent();
         Icon = CreateWindowIcon();
+        VersionText.Text = $"Version {AppInfo.DisplayVersion}";
 
         _loading = true;
         StartWithWindowsBox.IsChecked = Startup.IsEnabled;

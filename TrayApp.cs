@@ -270,6 +270,7 @@ internal sealed class TrayApp : ApplicationContext
         });
 
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem($"InputSwitch {AppInfo.Version}") { Enabled = false });
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
     }
 

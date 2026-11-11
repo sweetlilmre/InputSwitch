@@ -1,0 +1,126 @@
+# Cuts a GitHub release when a version tag is pushed.
+#
+#   1. Bump <VersionPrefix> in InputSwitch.csproj and merge that to main.
+#   2. Tag the merge commit:  git tag v1.2.0 && git push origin v1.2.0
+#      (a tag with a suffix, e.g. v1.2.0-beta.1, or any 0.x version makes a pre-release)
+#
+# The tag must match VersionPrefix. The smoke tests run first, then the release build itself is
+# smoke-tested, and only then is the release created.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build and publish release
+    needs: smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # create the release and upload its files
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Check the tag matches the project version
+        id: version
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v(?<prefix>\d+\.\d+\.\d+)(?:-(?<suffix>[0-9A-Za-z][0-9A-Za-z.-]*))?$') {
+            Write-Output "::error::Tag '$env:TAG' isn't vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-suffix."
+            exit 1
+          }
+          $prefix = $Matches.prefix
+          $suffix = $Matches.suffix
+          $project = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
+          if ($project -ne $prefix) {
+            Write-Output "::error::Tag $env:TAG doesn't match <VersionPrefix>$project</VersionPrefix> in InputSwitch.csproj. Bump VersionPrefix (or fix the tag) and tag again."
+            exit 1
+          }
+          $version = if ($suffix) { "$prefix-$suffix" } else { $prefix }
+          "version=$version"                          >> $env:GITHUB_OUTPUT
+          "suffix=$suffix"                            >> $env:GITHUB_OUTPUT
+          # A suffix (v1.2.0-beta.1) or a 0.x version (still in beta) is published as a pre-release.
+          $prerelease = [bool]$suffix -or $prefix.StartsWith('0.')
+          "prerelease=$($prerelease.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Output "Releasing InputSwitch $version"
+
+      - name: Build release files
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SUFFIX: ${{ steps.version.outputs.suffix }}
+        run: |
+          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true')
+          if ($env:SUFFIX) { $common += "-p:VersionSuffix=$env:SUFFIX" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+          # Single self-contained .exe per architecture: nothing else to install.
+          foreach ($rid in 'win-x64', 'win-arm64') {
+            dotnet publish InputSwitch.csproj @common -r $rid --self-contained `
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "out/$rid"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            Compress-Archive -Path "out/$rid/*" -DestinationPath "dist/InputSwitch-$env:VERSION-$rid.zip"
+          }
+
+          # Small build for machines that already have the .NET 10 Desktop Runtime.
+          dotnet publish InputSwitch.csproj @common -r win-x64 --self-contained false -o out/framework
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Compress-Archive -Path "out/framework/*" -DestinationPath "dist/InputSwitch-$env:VERSION-win-x64-framework-dependent.zip"
+
+          Get-ChildItem dist/*.zip | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content dist/SHA256SUMS.txt
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Build screenshot tool
+        run: dotnet build tools/WindowCapture -c Release
+
+      - name: Smoke-test the release build
+        shell: pwsh
+        run: >
+          ./tests/launch-smoke.ps1
+          -Exe out/win-x64/InputSwitch.exe
+          -OutDir smoke-release
+          -Capture tools/WindowCapture/bin/Release/net10.0-windows10.0.22621.0/WindowCapture.exe
+
+      - name: Create the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $files = (Get-ChildItem dist/*).FullName
+          $options = @('--title', "InputSwitch $env:VERSION", '--generate-notes', '--verify-tag')
+          if ($env:PRERELEASE -eq 'true') { $options += '--prerelease' }
+          gh release create $env:TAG @files @options
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Upload release smoke results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-smoke-results
+          path: smoke-release
+          if-no-files-found: ignore
+          retention-days: 30

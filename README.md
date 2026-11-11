@@ -29,14 +29,13 @@ InputSwitch also remembers each place you work. Your desk at work and your desk 
 You'll need:
 
 - **Windows 10 or 11.** It looks its best on Windows 11.
-- **The .NET 10 Desktop Runtime**, a free download from Microsoft. Your IT team may have already installed it.
 - **Monitors that accept commands from your computer.** Most Dell, LG, Samsung, HP, Lenovo, BenQ and ASUS monitors do. The feature is called **DDC/CI** and is usually on already. If not, look for it in the monitor's on-screen menu (on Dell monitors it's under **Others**).
 
 It usually won't work with TVs, or through some docks, KVM switches and adapters. Plugging the monitor in directly often fixes that.
 
 ## Getting started
 
-1. **Run `InputSwitch.exe`.** It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
+1. **Download and run it.** From the project's **Releases** page, download the latest zip: `win-x64` for most PCs, or `win-arm64` for Arm laptops such as Snapdragon models. Unzip it to a folder of your choice and run `InputSwitch.exe`; there's nothing else to install. It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
 2. **Give it a name.** Click *Setup 1* at the top and type something like `Work`.
 3. **Add a hotkey.** Click **Add hotkey**, choose a monitor, click the *Key combination* box and press the keys you want, for example **Ctrl + Alt + M**. Then tick the inputs, for example **DisplayPort 1** and **HDMI 1**, and click **Save**.
 4. **Try it.** Click the ▷ button next to your new hotkey.
@@ -99,6 +98,7 @@ InputSwitch sits in the notification area as a small blue monitor with two arrow
   - run any of your hotkeys,
   - switch a monitor to any input as a one-off,
   - turn **Start with Windows** on or off,
+  - see which version you have,
   - **Exit**.
 
 ## Notifications

@@ -31,6 +31,7 @@
                         <TextBlock Text="New from current setup" />
                     </StackPanel>
                 </Button>
+                <TextBlock x:Name="VersionText" Margin="8,12,0,0" FontSize="11" Style="{StaticResource Secondary}" />
             </StackPanel>
 
             <ListBox x:Name="ProfilesList" Background="Transparent" BorderThickness="0"

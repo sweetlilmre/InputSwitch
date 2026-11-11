@@ -17,7 +17,8 @@ internal static class Program
             return;
         }
 
-        using var mutex = new Mutex(initiallyOwned: true, @"Local\InputSwitch-6d3f0b8e", out bool isFirst);
+        // One instance per config folder: a test copy with its own folder can run beside the real one.
+        using var mutex = new Mutex(initiallyOwned: true, @"Local\InputSwitch-6d3f0b8e" + ConfigStore.InstanceKey, out bool isFirst);
         if (!isFirst)
         {
             UI.AppDialogs.Alert(UI.DialogIcon.Info, "InputSwitch is already running",
@@ -40,6 +41,8 @@ internal static class Program
     {
         var sb = new StringBuilder();
         sb.AppendLine($"InputSwitch diagnostics — {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"Version:         {AppInfo.FullVersion}");
+        sb.AppendLine($"Windows:         {Environment.OSVersion.VersionString}");
         sb.AppendLine();
 
         var monitors = MonitorService.Enumerate();

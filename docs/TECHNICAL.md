@@ -7,6 +7,8 @@ This is the developer and power-user companion to the [user guide](../README.md)
 ## Contents
 
 - [Building and publishing](#building-and-publishing)
+- [Versioning and releases](#versioning-and-releases)
+- [Smoke tests and CI](#smoke-tests-and-ci)
 - [Project layout](#project-layout)
 - [How it works](#how-it-works)
 - [The settings file](#the-settings-file)
@@ -19,28 +21,84 @@ This is the developer and power-user companion to the [user guide](../README.md)
 
 ## Building and publishing
 
-You need the **.NET 10 SDK**. The app has no third-party dependencies.
+You need the **.NET 10 SDK**; `global.json` pins the feature band. The app has no third-party dependencies.
 
 ```
 dotnet build -c Release
 bin\Release\net10.0-windows\InputSwitch.exe
 ```
 
-A single executable that doesn't need .NET installed:
+A single executable that doesn't need .NET installed, as the release workflow builds it:
 
 ```
-dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
+dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
-A framework-dependent build needs the **.NET 10 Desktop Runtime** on the target machine.
+`IncludeNativeLibrariesForSelfExtract` is needed because WPF has native libraries. The result is large (about 165 MB for x64, 180 MB for Arm64), because it carries the whole .NET desktop runtime, and WPF and WinForms can't be trimmed. The framework-dependent build is about 0.3 MB, but needs the **.NET 10 Desktop Runtime** on the target machine.
 
 The running app locks `InputSwitch.exe`, so exit it from the tray before rebuilding Release. A Debug build (`dotnet build -c Debug`) is a quick way to check the code compiles while it's running.
+
+## Versioning and releases
+
+The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. The SDK derives the assembly and file versions from it, and appends the git commit to the informational version, e.g. `0.1.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the settings window's left-hand pane, and in the diagnostic report (`AppInfo.cs`).
+
+**To cut a release:**
+
+1. In a pull request, bump `<VersionPrefix>` (e.g. `0.1.0` → `0.2.0`) and merge it once CI passes.
+2. Tag the merge commit on `main` and push the tag:
+   ```
+   git checkout main && git pull
+   git tag v1.1.0
+   git push origin v1.1.0
+   ```
+   A tag with a suffix, e.g. `v1.1.0-beta.1`, makes a **pre-release** (the suffix becomes the version suffix). So does any **0.x** version, which means the app is still in beta; the first release is `v0.1.0`.
+
+The **Release** workflow (`.github/workflows/release.yml`) then:
+
+1. runs the full CI smoke tests;
+2. checks the tag matches `VersionPrefix`, and stops with an error if it doesn't;
+3. publishes self-contained single-file builds for **win-x64** and **win-arm64**, plus a small framework-dependent win-x64 build, and zips each;
+4. runs the launch smoke test against the self-contained x64 build, the exact file being shipped;
+5. creates the GitHub release with generated release notes, the zips and `SHA256SUMS.txt`.
+
+| Release file | For |
+|---|---|
+| `InputSwitch-<version>-win-x64.zip` | Most PCs. Nothing else to install. |
+| `InputSwitch-<version>-win-arm64.zip` | Arm laptops (e.g. Snapdragon). Nothing else to install. |
+| `InputSwitch-<version>-win-x64-framework-dependent.zip` | PCs that already have the .NET 10 Desktop Runtime. Much smaller download. |
+| `SHA256SUMS.txt` | Checksums for the zips. |
+
+If a release run fails after the tag is pushed, fix the problem, delete the tag (`git push --delete origin v1.1.0` and `git tag -d v1.1.0`), and tag again.
+
+Keep the repository private or internal to the company's GitHub organisation, so releases are only visible to colleagues. Check with the AI Engineering team before making it more widely available.
+
+## Smoke tests and CI
+
+There are two layers of smoke tests. Neither needs monitors, and neither changes anything on the machine.
+
+| Test | What it checks | Run locally |
+|---|---|---|
+| **Logic** (`tests/InputSwitch.SmokeTests`) | Capabilities parsing (with real Dell strings), EDID parsing, setup fingerprinting and matching, hotkey rules and display, action descriptions, settings round-trip. A plain console runner with no test-framework packages. | `dotnet run -c Release --project tests/InputSwitch.SmokeTests` |
+| **Launch** (`tests/launch-smoke.ps1`) | Starts the real exe. `--diagnose` writes a report; `--settings` opens the window and it renders (found through UI Automation); no error dialog appears; the app stays up. Saves the report, plus a screenshot if `-Capture` points at WindowCapture. | `pwsh tests/launch-smoke.ps1 -Exe bin\Release\net10.0-windows\InputSwitch.exe` |
+
+The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
+
+The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It does five things on `windows-latest`:
+
+1. builds the app;
+2. runs both smoke-test layers;
+3. checks a single-file release build publishes;
+4. uploads the diagnostic report and screenshot as the `smoke-results` artifact, so you can see the window from the PR;
+5. is also called by the Release workflow before anything is published.
+
+**Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
 
 ## Project layout
 
 | Path | Contents |
 |---|---|
 | `Program.cs` | Entry point: single-instance check, `--diagnose`, `--settings`. |
+| `AppInfo.cs` | Version and commit, read from the assembly attributes. |
 | `TrayApp.cs` | The tray icon and menu, display-change handling, profile activation and hotkey registration. |
 | `Startup.cs` | "Start with Windows" (per-user Run key). |
 | `TrayIconFactory.cs` | Draws the tray and window icon at runtime (no `.ico` file). |
@@ -49,7 +107,10 @@ The running app locks `InputSwitch.exe`, so exit it from the tray before rebuild
 | `Monitors/` | `MonitorService` (enumeration and DDC/CI), `Edid`, `InputSources` (VCP 0x60 names and capabilities parsing), `InputSwitcher` (switch/toggle/cycle logic). |
 | `Native/` | P/Invoke declarations: user32, dxva2, and the CCD display-configuration API. |
 | `UI/` | WPF windows: settings (`ConfigWindow`), hotkey editor (`BindingEditorWindow`), themed dialog (`FluentDialog`), shared styles and view models, and the WinForms/WPF bridge (`WpfHost`, `SettingsWindow`). |
+| `tests/` | Smoke tests: logic (`InputSwitch.SmokeTests`) and launch (`launch-smoke.ps1`). |
 | `tools/WindowCapture/` | Developer screenshot tool (separate project, excluded from the app build). |
+| `.github/workflows/` | CI (`ci.yml`) and release (`release.yml`). |
+| `global.json` | Pins the .NET SDK feature band for local and CI builds. |
 
 ## How it works
 
@@ -105,7 +166,7 @@ A binding with one input sets that input. With several inputs, it reads the curr
 
 ## The settings file
 
-Stored at `%APPDATA%\InputSwitch\config.json`. It's written atomically (to a temporary file, then moved into place). If it can't be read, it's kept as `config.json.bad` and the app starts with fresh settings.
+Stored at `%APPDATA%\InputSwitch\config.json`, or in the folder named by the `INPUTSWITCH_CONFIG_DIR` environment variable if it's set. An instance with its own folder also gets its own single-instance lock. It's written atomically (to a temporary file, then moved into place). If it can't be read, it's kept as `config.json.bad` and the app starts with fresh settings.
 
 ```json
 {
