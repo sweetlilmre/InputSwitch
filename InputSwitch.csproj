@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>InputSwitch</AssemblyName>
+    <RootNamespace>InputSwitch</RootNamespace>
+    <Product>InputSwitch</Product>
+    <Description>Tray utility that switches monitor inputs over DDC/CI with per-setup hotkeys.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+</Project>
