@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Windows.Forms;
 using System.Text;
 using InputSwitch.Config;
 using InputSwitch.Monitors;
@@ -24,7 +26,10 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new TrayApp());
+
+        bool openSettings = args.Any(a => a.Equals("--settings", StringComparison.OrdinalIgnoreCase));
+        Application.Run(new TrayApp(openSettings));
+        UI.WpfHost.Shutdown();
     }
 
     /// <summary>

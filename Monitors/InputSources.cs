@@ -25,7 +25,8 @@ internal static class InputSources
         [0x10] = "DisplayPort 2",
         [0x11] = "HDMI 1",
         [0x12] = "HDMI 2",
-        [0x1B] = "USB-C",
+        [0x19] = "USB-C",   // Dell U2725QE (Thunderbolt / USB-C)
+        [0x1B] = "USB-C",   // Dell U2723QE and others
     };
 
     /// <summary>Inputs offered when a monitor's capabilities could not be read.</summary>

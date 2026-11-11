@@ -1,5 +1,7 @@
-using System.Runtime.InteropServices;
+using System.Windows.Controls;
+using System.Windows.Input;
 using InputSwitch.Hotkeys;
+using Keys = System.Windows.Forms.Keys;
 
 namespace InputSwitch.UI;
 
@@ -8,73 +10,87 @@ internal sealed class HotkeyBox : TextBox
 {
     private Hotkey _hotkey = new();
 
-    [DllImport("user32.dll")]
-    private static extern short GetKeyState(int vk);
-    private const int VK_LWIN = 0x5B, VK_RWIN = 0x5C;
-
     public event EventHandler? HotkeyChanged;
 
     public HotkeyBox()
     {
-        ShortcutsEnabled = false;
-        Cursor = Cursors.Default;
+        // Implicit (theme) styles only apply to the exact type, so borrow TextBox's Fluent style.
+        SetResourceReference(StyleProperty, typeof(TextBox));
+        IsReadOnly = true;
+        IsReadOnlyCaretVisible = false;
+        IsUndoEnabled = false;
+        ContextMenu = null;
         UpdateText();
     }
 
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Hotkey Hotkey
     {
         get => _hotkey;
-        set { _hotkey = value ?? new Hotkey(); UpdateText(); HotkeyChanged?.Invoke(this, EventArgs.Empty); }
+        set
+        {
+            _hotkey = value ?? new Hotkey();
+            UpdateText();
+            HotkeyChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        var key = keyData & Keys.KeyCode;
-        var mods = keyData & Keys.Modifiers;
+        var key = e.Key switch
+        {
+            Key.System => e.SystemKey,         // keys pressed with Alt
+            Key.ImeProcessed => e.ImeProcessedKey,
+            _ => e.Key,
+        };
+        var mods = Keyboard.Modifiers;
 
         // Plain Tab / Shift+Tab still move focus.
-        if (key == Keys.Tab && (mods & ~Keys.Shift) == 0) return base.ProcessCmdKey(ref msg, keyData);
+        if (key == Key.Tab && (mods & ~ModifierKeys.Shift) == 0) return;
 
-        // Backspace / Delete / Escape on their own clear the box.
-        if (mods == Keys.None && key is Keys.Back or Keys.Delete or Keys.Escape)
+        // Plain Enter / Escape still reach the dialog's Save / Cancel buttons.
+        if (mods == ModifierKeys.None && key is Key.Enter or Key.Escape) return;
+
+        e.Handled = true;
+
+        // Backspace / Delete on their own clear the box.
+        if (mods == ModifierKeys.None && key is Key.Back or Key.Delete)
         {
             Hotkey = new Hotkey();
-            return true;
+            return;
         }
 
         var m = HotkeyModifiers.None;
-        if ((mods & Keys.Control) != 0) m |= HotkeyModifiers.Control;
-        if ((mods & Keys.Alt) != 0) m |= HotkeyModifiers.Alt;
-        if ((mods & Keys.Shift) != 0) m |= HotkeyModifiers.Shift;
-        if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) m |= HotkeyModifiers.Win;
+        if (mods.HasFlag(ModifierKeys.Control)) m |= HotkeyModifiers.Control;
+        if (mods.HasFlag(ModifierKeys.Alt)) m |= HotkeyModifiers.Alt;
+        if (mods.HasFlag(ModifierKeys.Shift)) m |= HotkeyModifiers.Shift;
+        if (mods.HasFlag(ModifierKeys.Windows)) m |= HotkeyModifiers.Win;
 
-        if (key is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin or Keys.None)
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
+            Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin or Key.None)
         {
             // Only modifiers held so far: show them as a hint.
-            Text = m != HotkeyModifiers.None ? PartialText(m) : _hotkey.ToString();
-            return true;
+            Text = m == HotkeyModifiers.None ? Describe() : PartialText(m);
+            return;
         }
 
-        Hotkey = new Hotkey { Modifiers = m, Key = key };
-        return true;
+        Hotkey = new Hotkey { Modifiers = m, Key = (Keys)KeyInterop.VirtualKeyFromKey(key) };
     }
 
-    protected override void OnKeyPress(KeyPressEventArgs e) => e.Handled = true;
-
-    protected override void OnKeyUp(KeyEventArgs e)
+    protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
-        base.OnKeyUp(e);
+        base.OnPreviewKeyUp(e);
+        if (Keyboard.Modifiers == ModifierKeys.None) UpdateText();
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnLostKeyboardFocus(e);
         UpdateText();
     }
 
-    protected override void OnLostFocus(EventArgs e)
-    {
-        base.OnLostFocus(e);
-        UpdateText();
-    }
+    private string Describe() => _hotkey.IsEmpty ? "Press a key combination…" : _hotkey.ToString();
 
-    private void UpdateText() => Text = _hotkey.IsEmpty ? "Press a key combination…" : _hotkey.ToString();
+    private void UpdateText() => Text = Describe();
 
     private static string PartialText(HotkeyModifiers m)
     {

@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Windows.Forms;
 using InputSwitch.Native;
 
 namespace InputSwitch.Hotkeys;

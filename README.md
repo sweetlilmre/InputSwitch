@@ -23,7 +23,7 @@ For a single self-contained executable: `dotnet publish -c Release -r win-x64 --
 
 ## Configuration window
 
-Open it by left-clicking the tray icon, or by right-clicking the icon and choosing **Configure…**.
+Open it by left-clicking the tray icon, by right-clicking the icon and choosing **Configure…**, or by starting the app with `InputSwitch.exe --settings`. The windows use WPF's built-in Windows 11 (Fluent) theme and follow the Windows light/dark setting; the tray, hotkeys and display detection run on WinForms, and WPF is only loaded when a window is opened.
 
 - **Configurations** (left): one per setup, e.g. rename "Setup 1" to "Work". **New from current setup** creates another one by hand.
 - **Enabled**: hotkeys are only registered while the configuration is enabled and its setup is connected. Adding the first hotkey enables it.

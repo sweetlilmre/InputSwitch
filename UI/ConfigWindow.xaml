@@ -1,0 +1,303 @@
+<Window x:Class="InputSwitch.UI.ConfigWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="InputSwitch" Width="1040" Height="740" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/InputSwitch;component/UI/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="264" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ============================================================ navigation pane -->
+        <DockPanel Grid.Column="0" Margin="12,12,8,12">
+            <TextBlock DockPanel.Dock="Top" Text="Configurations" Style="{StaticResource SectionTitle}" Margin="8,4,0,10" />
+
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                <Button x:Name="NewButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="12,7" Click="OnNewFromCurrent"
+                        ToolTip="Create a configuration for the monitors connected now">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" Margin="0,0,10,0" />
+                        <TextBlock Text="New from current setup" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <ListBox x:Name="ProfilesList" Background="Transparent" BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="OnProfileSelected">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="2,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="NavIcon" Style="{StaticResource Icon}" Text="&#xE7F4;" FontSize="18" Margin="0,0,12,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Subtitle}" FontSize="12" Style="{StaticResource Secondary}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                <Setter TargetName="NavIcon" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+        <!-- ============================================================ content -->
+        <Border Grid.Column="1" Background="{DynamicResource LayerFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1,1,0,0" CornerRadius="8,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Shown when there is no configuration to edit. -->
+                <StackPanel x:Name="EmptyState" Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE7F4;" FontSize="48" HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    <TextBlock x:Name="EmptyStateText" Margin="0,16,0,0" TextAlignment="Center" Style="{StaticResource Secondary}" />
+                </StackPanel>
+
+                <ScrollViewer x:Name="Editor" Grid.Row="0" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="32,24,32,24">
+
+                        <!-- Header: name, on/off, delete -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="NameBox" FontSize="24" FontWeight="SemiBold" Padding="8,4" TextChanged="OnNameChanged"
+                                     ToolTip="Name of this configuration, e.g. Work or Home" />
+                            <Button Grid.Column="1" Margin="12,0,0,0" Padding="10,8" Click="OnDeleteProfile" ToolTip="Delete this configuration" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" Margin="0,0,8,0" />
+                                    <TextBlock Text="Delete" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Status banner -->
+                        <Border x:Name="StatusBanner" Margin="0,16,0,0" CornerRadius="6" Padding="14,10" BorderThickness="1"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="StatusIcon" Style="{StaticResource Icon}" FontSize="16" Margin="0,0,12,0" />
+                                <TextBlock x:Name="StatusText" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <CheckBox x:Name="EnabledBox" Grid.Column="2" Margin="16,0,0,0" Content="Hotkeys on"
+                                          Checked="OnEnabledChanged" Unchecked="OnEnabledChanged"
+                                          ToolTip="Register this configuration's hotkeys whenever this setup is connected" />
+                            </Grid>
+                        </Border>
+
+                        <!-- Monitors -->
+                        <Border Style="{StaticResource Card}" Margin="0,20,0,0">
+                            <StackPanel>
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Style="{StaticResource ToolbarButton}" Click="OnDetectInputs" ToolTip="Ask each connected monitor which inputs it has">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource Icon}" Text="&#xE72C;" Margin="0,0,8,0" />
+                                                <TextBlock Text="Detect inputs" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource ToolbarButton}" Click="OnAddConnectedMonitors" ToolTip="Add connected monitors that are not in this configuration">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" Margin="0,0,8,0" />
+                                                <TextBlock Text="Add connected" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="Monitors" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="This configuration is used whenever these monitors are connected." Style="{StaticResource Secondary}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <ItemsControl x:Name="MonitorsList" Margin="0,12,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border x:Name="Row" Margin="0,6,0,0" Padding="14,12" CornerRadius="6" BorderThickness="1"
+                                                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Style="{StaticResource Icon}" Text="&#xE7F4;" FontSize="28" Margin="0,0,16,0" VerticalAlignment="Top" />
+                                                    <StackPanel Grid.Column="1">
+                                                        <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontWeight="SemiBold" MaxWidth="360"
+                                                                 HorizontalAlignment="Left" MinWidth="220" ToolTip="Rename this monitor" LostFocus="OnMonitorNameCommitted" />
+                                                        <TextBlock Text="{Binding Details}" Style="{StaticResource Secondary}" FontSize="12" Margin="2,4,0,0" />
+                                                        <ItemsControl ItemsSource="{Binding Inputs}" ItemTemplate="{StaticResource InputChipTemplate}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                        </ItemsControl>
+                                                        <TextBlock Text="{Binding InputsHint}" FontStyle="Italic" FontSize="12" Margin="2,6,0,0">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock" BasedOn="{StaticResource Secondary}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding InputsHint}" Value="">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
+                                                        <Border x:Name="Pill" CornerRadius="10" Padding="10,3" VerticalAlignment="Center"
+                                                                Background="{DynamicResource SystemFillColorNeutralBackgroundBrush}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Ellipse x:Name="Dot" Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center"
+                                                                         Fill="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                                <TextBlock Text="{Binding StatusText}" FontSize="12" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Button Style="{StaticResource RowIconButton}" Margin="10,0,0,0" Click="OnRemoveMonitor" Tag="{Binding}"
+                                                                ToolTip="Remove this monitor (and its hotkeys) from the configuration">
+                                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" />
+                                                        </Button>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    <Setter TargetName="Pill" Property="Background" Value="{DynamicResource SystemFillColorSuccessBackgroundBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsConnected}" Value="False">
+                                                    <Setter TargetName="Row" Property="Opacity" Value="0.7" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Hotkeys -->
+                        <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{DynamicResource AccentButtonStyle}" Padding="12,5" Click="OnAddHotkey">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" Margin="0,0,8,0" />
+                                            <TextBlock Text="Add hotkey" />
+                                        </StackPanel>
+                                    </Button>
+                                    <StackPanel>
+                                        <TextBlock Text="Hotkeys" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="Switch to one input, toggle between two, or cycle through several." Style="{StaticResource Secondary}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <TextBlock x:Name="NoHotkeys" Margin="0,16,0,4" Style="{StaticResource Secondary}"
+                                           Text="No hotkeys yet. Add one to switch a monitor's input from the keyboard." />
+
+                                <ItemsControl x:Name="HotkeysList" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,6,0,0" Padding="14,10" CornerRadius="6" BorderThickness="1"
+                                                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="220" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ItemsControl ItemsSource="{Binding Keys}" VerticalAlignment="Center">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Style="{StaticResource KeyCap}">
+                                                                    <TextBlock Text="{Binding}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Action}" />
+                                                        <TextBlock Text="{Binding MonitorName}" Style="{StaticResource Secondary}" FontSize="12" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                                        <Button Style="{StaticResource RowIconButton}" Click="OnTestHotkey" Tag="{Binding}" ToolTip="Run this action now">
+                                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE768;" />
+                                                        </Button>
+                                                        <Button Style="{StaticResource RowIconButton}" Click="OnEditHotkey" Tag="{Binding}" ToolTip="Edit">
+                                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE70F;" />
+                                                        </Button>
+                                                        <Button Style="{StaticResource RowIconButton}" Click="OnRemoveHotkey" Tag="{Binding}" ToolTip="Delete">
+                                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" />
+                                                        </Button>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ============================================================ footer -->
+                <Border Grid.Row="1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="32,12">
+                    <DockPanel LastChildFill="True">
+                        <!-- Progress and results (detecting inputs, testing a hotkey); hidden when empty. -->
+                        <TextBlock x:Name="ActivityText" DockPanel.Dock="Top" Margin="0,0,0,10" FontSize="12" TextWrapping="Wrap">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource Secondary}">
+                                    <Style.Triggers>
+                                        <Trigger Property="Text" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="Save" MinWidth="100" Style="{DynamicResource AccentButtonStyle}" IsDefault="True" Click="OnSave" />
+                            <!-- IsCancel only closes modal dialogs; this window is modeless, so close it explicitly. -->
+                            <Button Content="Cancel" MinWidth="100" Margin="8,0,0,0" IsCancel="True" Click="OnCancel" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <CheckBox x:Name="StartWithWindowsBox" Content="Start with Windows" Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
+                            <CheckBox x:Name="NotifyBox" Content="Notify when the setup changes" Margin="20,0,0,0" Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

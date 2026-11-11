@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Windows.Forms;
 using InputSwitch.Config;
 using InputSwitch.Hotkeys;
 using InputSwitch.Monitors;
@@ -22,10 +24,10 @@ internal sealed class TrayApp : ApplicationContext
     private AppConfig _config;
     private List<MonitorInfo> _connected = [];
     private Profile? _active;
-    private ConfigForm? _configForm;
+    private ISettingsWindow? _configForm;
     private Action? _balloonClick;
 
-    public TrayApp()
+    public TrayApp(bool openSettings = false)
     {
         _config = ConfigStore.Load();
         bool firstRun = _config.Profiles.Count == 0;
@@ -55,6 +57,7 @@ internal sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch += OnSessionSwitch;
 
         Evaluate(interactive: firstRun);
+        if (openSettings && _configForm is null) OpenConfig(_active?.Id);
     }
 
     // ------------------------------------------------------------------ setup detection
@@ -168,20 +171,20 @@ internal sealed class TrayApp : ApplicationContext
         if (_configForm is not null)
         {
             _configForm.SelectProfile(selectProfileId);
-            _configForm.Activate();
+            _configForm.BringToFront();
             return;
         }
 
         // Release the hotkeys while editing so they can be captured in the hotkey boxes.
         _window.UnregisterAll();
 
-        _configForm = new ConfigForm(ConfigStore.Clone(_config), _connected, _active?.Id, selectProfileId, _switcher);
+        _configForm = SettingsWindow.Create(ConfigStore.Clone(_config), _connected, _active?.Id, selectProfileId, _switcher);
         _configForm.Saved += edited =>
         {
             _config = edited;
             Save();
         };
-        _configForm.FormClosed += (_, _) =>
+        _configForm.Closed += (_, _) =>
         {
             _configForm = null;
             _active = null; // profiles may have been edited or deleted; re-match from scratch
