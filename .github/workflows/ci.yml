@@ -42,16 +42,9 @@ jobs:
       - name: Logic smoke tests
         run: dotnet run -c Release --project tests/InputSwitch.SmokeTests
 
-      - name: Build screenshot tool
-        run: dotnet build tools/WindowCapture -c Release
-
       - name: Launch smoke test
         shell: pwsh
-        run: >
-          ./tests/launch-smoke.ps1
-          -Exe bin/Release/net10.0-windows/InputSwitch.exe
-          -OutDir smoke-out
-          -Capture tools/WindowCapture/bin/Release/net10.0-windows10.0.22621.0/WindowCapture.exe
+        run: ./tests/launch-smoke.ps1 -Exe bin/Release/net10.0-windows/InputSwitch.exe -OutDir smoke-out
 
       - name: Check a release build publishes
         run: >
@@ -59,7 +52,7 @@ jobs:
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish-check
 
-      - name: Upload smoke results (report and screenshot)
+      - name: Upload smoke results (diagnostic report)
         if: always()
         uses: actions/upload-artifact@v7
         with:

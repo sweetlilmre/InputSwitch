@@ -51,7 +51,7 @@ The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It fo
    git tag v1.1.0
    git push origin v1.1.0
    ```
-   A tag with a suffix, e.g. `v1.1.0-beta.1`, makes a **pre-release** (the suffix becomes the version suffix). So does any **0.x** version, which means the app is still in beta; the first release is `v0.1.0`.
+   A tag with a suffix, e.g. `v1.1.0-beta.1`, makes a **pre-release** (the suffix becomes the version suffix). Any other tag, including 0.x versions, makes a full release marked **Latest**.
 
 The **Release** workflow (`.github/workflows/release.yml`) then:
 
@@ -79,7 +79,7 @@ There are two layers of smoke tests. Neither needs monitors, and neither changes
 | Test | What it checks | Run locally |
 |---|---|---|
 | **Logic** (`tests/InputSwitch.SmokeTests`) | Capabilities parsing (with real Dell strings), EDID parsing, setup fingerprinting and matching, hotkey rules and display, action descriptions, settings round-trip. A plain console runner with no test-framework packages. | `dotnet run -c Release --project tests/InputSwitch.SmokeTests` |
-| **Launch** (`tests/launch-smoke.ps1`) | Starts the real exe. `--diagnose` writes a report; `--settings` opens the window and it renders (found through UI Automation); no error dialog appears; the app stays up. Saves the report, plus a screenshot if `-Capture` points at WindowCapture. | `pwsh tests/launch-smoke.ps1 -Exe bin\Release\net10.0-windows\InputSwitch.exe` |
+| **Launch** (`tests/launch-smoke.ps1`) | Starts the real exe. `--diagnose` writes a report; `--settings` opens the window and it renders (found through UI Automation); no error dialog appears; the app stays up. Saves the report, plus a screenshot if `-Capture` points at WindowCapture (CI doesn't use this). | `pwsh tests/launch-smoke.ps1 -Exe bin\Release\net10.0-windows\InputSwitch.exe` |
 
 The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
 
@@ -88,7 +88,7 @@ The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `
 1. builds the app;
 2. runs both smoke-test layers;
 3. checks a single-file release build publishes;
-4. uploads the diagnostic report and screenshot as the `smoke-results` artifact, so you can see the window from the PR;
+4. uploads the diagnostic report as the `smoke-results` artifact;
 5. is also called by the Release workflow before anything is published.
 
 **Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.

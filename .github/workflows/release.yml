@@ -2,7 +2,7 @@
 #
 #   1. Bump <VersionPrefix> in InputSwitch.csproj and merge that to main.
 #   2. Tag the merge commit:  git tag v1.2.0 && git push origin v1.2.0
-#      (a tag with a suffix, e.g. v1.2.0-beta.1, or any 0.x version makes a pre-release)
+#      (a tag with a suffix, e.g. v1.2.0-beta.1, makes a pre-release)
 #
 # The tag must match VersionPrefix. The smoke tests run first, then the release build itself is
 # smoke-tested, and only then is the release created.
@@ -58,9 +58,8 @@ jobs:
           $version = if ($suffix) { "$prefix-$suffix" } else { $prefix }
           "version=$version"                          >> $env:GITHUB_OUTPUT
           "suffix=$suffix"                            >> $env:GITHUB_OUTPUT
-          # A suffix (v1.2.0-beta.1) or a 0.x version (still in beta) is published as a pre-release.
-          $prerelease = [bool]$suffix -or $prefix.StartsWith('0.')
-          "prerelease=$($prerelease.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          # Only a suffixed tag (v1.2.0-beta.1) is published as a pre-release.
+          "prerelease=$(([bool]$suffix).ToString().ToLower())" >> $env:GITHUB_OUTPUT
           Write-Output "Releasing InputSwitch $version"
 
       - name: Build release files
@@ -91,16 +90,9 @@ jobs:
           } | Set-Content dist/SHA256SUMS.txt
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: Build screenshot tool
-        run: dotnet build tools/WindowCapture -c Release
-
       - name: Smoke-test the release build
         shell: pwsh
-        run: >
-          ./tests/launch-smoke.ps1
-          -Exe out/win-x64/InputSwitch.exe
-          -OutDir smoke-release
-          -Capture tools/WindowCapture/bin/Release/net10.0-windows10.0.22621.0/WindowCapture.exe
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64/InputSwitch.exe -OutDir smoke-release
 
       - name: Create the GitHub release
         shell: pwsh
