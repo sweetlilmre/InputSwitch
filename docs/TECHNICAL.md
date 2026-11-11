@@ -83,13 +83,14 @@ There are two layers of smoke tests. Neither needs monitors, and neither changes
 
 The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
 
-The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It does five things on `windows-latest`:
+The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It does four things on `windows-latest`:
 
 1. builds the app;
 2. runs both smoke-test layers;
 3. checks a single-file release build publishes;
-4. uploads the diagnostic report as the `smoke-results` artifact;
-5. is also called by the Release workflow before anything is published.
+4. is also called by the Release workflow before anything is published.
+
+Nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
 
 **Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
 

@@ -92,7 +92,7 @@ jobs:
 
       - name: Smoke-test the release build
         shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64/InputSwitch.exe -OutDir smoke-release
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64/InputSwitch.exe
 
       - name: Create the GitHub release
         shell: pwsh
@@ -107,12 +107,3 @@ jobs:
           if ($env:PRERELEASE -eq 'true') { $options += '--prerelease' }
           gh release create $env:TAG @files @options
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-      - name: Upload release smoke results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-smoke-results
-          path: smoke-release
-          if-no-files-found: ignore
-          retention-days: 30

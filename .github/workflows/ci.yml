@@ -44,19 +44,10 @@ jobs:
 
       - name: Launch smoke test
         shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe bin/Release/net10.0-windows/InputSwitch.exe -OutDir smoke-out
+        run: ./tests/launch-smoke.ps1 -Exe bin/Release/net10.0-windows/InputSwitch.exe
 
       - name: Check a release build publishes
         run: >
           dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish-check
-
-      - name: Upload smoke results (diagnostic report)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: smoke-results
-          path: smoke-out
-          if-no-files-found: ignore
-          retention-days: 14

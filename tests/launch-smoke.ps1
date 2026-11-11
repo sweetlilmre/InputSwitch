@@ -89,5 +89,14 @@ finally {
 }
 
 Write-Host ""
-if ($failures.Count) { Write-Host "$($failures.Count) launch check(s) FAILED."; exit 1 }
+if ($failures.Count) {
+    # Put the diagnostic report in the log, so a failed CI run explains itself.
+    if (Test-Path $report) {
+        Write-Host "---- diagnostic report ----"
+        Get-Content $report | ForEach-Object { Write-Host "  $_" }
+        Write-Host "---------------------------"
+    }
+    Write-Host "$($failures.Count) launch check(s) FAILED."
+    exit 1
+}
 Write-Host "All launch checks passed."
