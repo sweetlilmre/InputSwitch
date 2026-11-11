@@ -34,7 +34,13 @@ A single executable that doesn't need .NET installed, as the release workflow bu
 dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
-`IncludeNativeLibrariesForSelfExtract` is needed because WPF has native libraries. The result is large (about 165 MB for x64, 180 MB for Arm64), because it carries the whole .NET desktop runtime, and WPF and WinForms can't be trimmed. The framework-dependent build is about 0.3 MB, but needs the **.NET 10 Desktop Runtime** on the target machine.
+`IncludeNativeLibrariesForSelfExtract` is needed because WPF has native libraries. The result is large (about 165 MB for x64, 180 MB for Arm64), because it carries the whole .NET desktop runtime, and WPF and WinForms can't be trimmed.
+
+A **slim** single exe of about 0.3 MB, using the installed **.NET 10 Desktop Runtime**:
+
+```
+dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
+```
 
 The running app locks `InputSwitch.exe`, so exit it from the tray before rebuilding Release. A Debug build (`dotnet build -c Debug`) is a quick way to check the code compiles while it's running.
 
@@ -57,15 +63,16 @@ The **Release** workflow (`.github/workflows/release.yml`) then:
 
 1. runs the full CI smoke tests;
 2. checks the tag matches `VersionPrefix`, and stops with an error if it doesn't;
-3. publishes self-contained single-file builds for **win-x64** and **win-arm64**, plus a small framework-dependent win-x64 build, and zips each;
-4. runs the launch smoke test against the self-contained x64 build, the exact file being shipped;
+3. publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and zips each;
+4. runs the launch smoke test against both x64 builds (full and slim), the exact files being shipped;
 5. creates the GitHub release with generated release notes, the zips and `SHA256SUMS.txt`.
 
 | Release file | For |
 |---|---|
-| `InputSwitch-<version>-win-x64.zip` | Most PCs. Nothing else to install. |
-| `InputSwitch-<version>-win-arm64.zip` | Arm laptops (e.g. Snapdragon). Nothing else to install. |
-| `InputSwitch-<version>-win-x64-framework-dependent.zip` | PCs that already have the .NET 10 Desktop Runtime. Much smaller download. |
+| `InputSwitch-<version>-win-x64-full.zip` | Most PCs. .NET runtime built in, nothing else to install (about 68 MB zipped). |
+| `InputSwitch-<version>-win-x64-slim.zip` | PCs that already have the .NET 10 Desktop Runtime. Tiny download. |
+| `InputSwitch-<version>-win-arm64-full.zip` | Arm laptops (e.g. Snapdragon). Nothing else to install. |
+| `InputSwitch-<version>-win-arm64-slim.zip` | Arm laptops with the .NET 10 Desktop Runtime. |
 | `SHA256SUMS.txt` | Checksums for the zips. |
 
 If a release run fails after the tag is pushed, fix the problem, delete the tag (`git push --delete origin v1.1.0` and `git tag -d v1.1.0`), and tag again.

@@ -72,27 +72,34 @@ jobs:
           if ($env:SUFFIX) { $common += "-p:VersionSuffix=$env:SUFFIX" }
           New-Item -ItemType Directory -Force dist | Out-Null
 
-          # Single self-contained .exe per architecture: nothing else to install.
+          # Two single-file builds per architecture:
+          #   full - .NET runtime built in, nothing else to install (large)
+          #   slim - uses the installed .NET 10 Desktop Runtime (small)
           foreach ($rid in 'win-x64', 'win-arm64') {
-            dotnet publish InputSwitch.csproj @common -r $rid --self-contained `
-              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "out/$rid"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            Compress-Archive -Path "out/$rid/*" -DestinationPath "dist/InputSwitch-$env:VERSION-$rid.zip"
+            foreach ($flavour in 'full', 'slim') {
+              $runtime = if ($flavour -eq 'full') {
+                @('--self-contained', '-p:IncludeNativeLibrariesForSelfExtract=true')
+              } else {
+                @('--self-contained', 'false')
+              }
+              dotnet publish InputSwitch.csproj @common -r $rid @runtime -p:PublishSingleFile=true -o "out/$rid-$flavour"
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+              Compress-Archive -Path "out/$rid-$flavour/*" -DestinationPath "dist/InputSwitch-$env:VERSION-$rid-$flavour.zip"
+            }
           }
-
-          # Small build for machines that already have the .NET 10 Desktop Runtime.
-          dotnet publish InputSwitch.csproj @common -r win-x64 --self-contained false -o out/framework
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Compress-Archive -Path "out/framework/*" -DestinationPath "dist/InputSwitch-$env:VERSION-win-x64-framework-dependent.zip"
 
           Get-ChildItem dist/*.zip | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Set-Content dist/SHA256SUMS.txt
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: Smoke-test the release build
+      - name: Smoke-test the full x64 build
         shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64/InputSwitch.exe
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
+
+      - name: Smoke-test the slim x64 build
+        shell: pwsh
+        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
 
       - name: Create the GitHub release
         shell: pwsh

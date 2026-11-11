@@ -35,7 +35,12 @@ It usually won't work with TVs, or through some docks, KVM switches and adapters
 
 ## Getting started
 
-1. **Download and run it.** From the project's **Releases** page, download the latest zip: `win-x64` for most PCs, or `win-arm64` for Arm laptops such as Snapdragon models. Unzip it to a folder of your choice and run `InputSwitch.exe`; there's nothing else to install. It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
+1. **Download and run it.** From the project's **Releases** page, download the latest zip:
+   - **`win-x64-full`** for most PCs. Everything is included, so there's nothing else to install.
+   - **`win-x64-slim`** is a much smaller download, if your PC already has the *.NET 10 Desktop Runtime* (if you're not sure, pick *full*).
+   - **`win-arm64-full`** or **`win-arm64-slim`** for Arm laptops, such as Snapdragon models.
+
+   Unzip it to a folder of your choice and run `InputSwitch.exe`. It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
 2. **Give it a name.** Click *Setup 1* at the top and type something like `Work`.
 3. **Add a hotkey.** Click **Add hotkey**, choose a monitor, click the *Key combination* box and press the keys you want, for example **Ctrl + Alt + M**. Then tick the inputs, for example **DisplayPort 1** and **HDMI 1**, and click **Save**.
 4. **Try it.** Click the ▷ button next to your new hotkey.
