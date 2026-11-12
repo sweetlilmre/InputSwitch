@@ -8,3 +8,6 @@ smoke-release/
 publish-check/
 out/
 dist/
+
+# Rust build output
+rust/target/

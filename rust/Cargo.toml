@@ -1,0 +1,21 @@
+[package]
+name = "inputswitch"
+version = "0.1.0"
+edition = "2021"
+description = "Tray utility that switches monitor inputs over DDC/CI with per-setup hotkeys."
+publish = false
+
+# No dependencies: the Windows API is called directly (see src/ffi.rs).
+[dependencies]
+
+[[bin]]
+name = "InputSwitch"
+path = "src/main.rs"
+
+# Smallest binary: optimise for size, link-time optimisation, no unwinding, no symbols.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
