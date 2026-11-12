@@ -62,8 +62,9 @@ try {
 
     if ($window) {
         Start-Sleep -Seconds 2   # let first-run detection settle
-        $texts = $window.FindAll($Scope::Descendants,
-            (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
+        # Match by name on any element: WPF reports labels as Text, but plain Win32 labels come
+        # through as Pane in PowerShell 7's UI Automation client.
+        $texts = $window.FindAll($Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
             ForEach-Object { $_.Current.Name }
         Check ($texts -contains 'Configurations') "settings window shows its content"
         Check ([bool]($texts | Where-Object { $_ -match '^Version \d+\.\d+\.\d+' })) "settings window shows the version"

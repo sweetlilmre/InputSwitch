@@ -258,7 +258,10 @@ USB-C has no standard code. The two listed are what those Dell models report. Ne
 dotnet build -c Release tools\WindowCapture
 tools\WindowCapture\bin\Release\net10.0-windows10.0.22621.0\WindowCapture.exe --pid <id> --list
 tools\WindowCapture\bin\Release\net10.0-windows10.0.22621.0\WindowCapture.exe --pid <id> [--title <title>] --out shot.png
+tools\WindowCapture\bin\Release\net10.0-windows10.0.22621.0\WindowCapture.exe --monitor --out screen.png
 ```
+
+`--monitor` captures the whole primary monitor. Use it for things that aren't an app's own window, such as Windows notifications.
 
 Windows are listed and searched front to back, so when a dialog shares its owner's title ("InputSwitch"), the dialog is the one captured. It targets `net10.0-windows10.0.22621.0`, which uses Microsoft's Windows SDK projection, to get the WinRT capture APIs.
 
