@@ -7,9 +7,11 @@ mod config;
 mod editor;
 mod ffi;
 mod hotkey;
+mod hotkey_box;
 mod json;
 mod matcher;
 mod monitors;
+mod reserved;
 mod settings;
 mod sys;
 mod tray;
@@ -28,7 +30,7 @@ fn main() {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: core::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES | ICC_HOTKEY_CLASS,
+            dwICC: ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES,
         };
         InitCommonControlsEx(&icc);
 

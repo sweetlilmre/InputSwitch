@@ -26,7 +26,7 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 
 - **Look:** native Win32 controls with the Windows visual style, Segoe UI and per-monitor DPI scaling, instead of WPF's Fluent theme. There's no dark mode or Mica background.
 - **Dialogs:** Windows' own `TaskDialog`. Questions offer Yes / No rather than buttons labelled "Delete" or "Don't save".
-- **Recording a hotkey:** uses Windows' built-in hotkey control. It records Ctrl, Alt and Shift combinations, but **not the Win key**. Existing Win-key hotkeys from the settings file still work and are kept when edited, unless you change the key.
+- **Recording a hotkey:** click the box to start recording (it turns blue while it's listening). Win-key combinations are recorded too: while the box is listening, a short-lived keyboard hook stops Windows acting on the Win key. On Save, the editor refuses combinations Windows or another app already owns, and warns about known Windows shortcuts (such as Ctrl + Win + M for Magnifier), which Windows handles before any app sees them.
 - **Renaming a monitor:** done in place in the list (select it and press **Rename**, or F2).
 
 ## How it's built
@@ -46,6 +46,8 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 | `tray.rs` | Tray icon and menu, display-change handling, configuration matching, hotkeys |
 | `settings.rs` | Settings window |
 | `editor.rs` | Hotkey editor |
+| `hotkey_box.rs` | Key-capture box for the hotkey editor (Win key included, via a short-lived keyboard hook) |
+| `reserved.rs` | Known Windows shortcuts, warned about when saving a hotkey |
 | `monitors.rs` | Enumeration (CCD + EDID), DDC/CI, capabilities parsing, switching |
 | `config.rs`, `matcher.rs`, `hotkey.rs` | Settings model and file, setup matching, hotkeys |
 | `ui.rs`, `sys.rs` | Win32 UI helpers, IDs, time, version, startup |
@@ -57,7 +59,7 @@ You need Rust (stable, MSVC toolchain).
 ```
 cd rust
 cargo build --release          # target\release\InputSwitch.exe
-cargo test --release           # 19 unit tests
+cargo test --release           # 21 unit tests
 pwsh ..\tests\launch-smoke.ps1 -Exe target\release\InputSwitch.exe
 ```
 
@@ -65,4 +67,4 @@ pwsh ..\tests\launch-smoke.ps1 -Exe target\release\InputSwitch.exe
 
 - CI and release workflows for the Rust build. The existing ones still build the C# app.
 - An Arm64 build. It needs the `aarch64-pc-windows-msvc` target; the code has no x64-specific parts.
-- Dark mode, and Win-key capture in the hotkey editor.
+- Dark mode.

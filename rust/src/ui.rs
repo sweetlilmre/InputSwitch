@@ -270,7 +270,9 @@ pub fn ask_yes_no_cancel(owner: HWND, main: &str, content: &str) -> i32 {
 }
 
 /// Runs a modal message loop for `dialog` (owner disabled) until `done()` is true.
-pub fn modal_loop(owner: HWND, dialog: HWND, done: &dyn Fn() -> bool) {
+/// Keyboard messages for which `raw_key(msg)` is true skip dialog navigation and character
+/// translation and go straight to their window (used by the hotkey capture box).
+pub fn modal_loop(owner: HWND, dialog: HWND, done: &dyn Fn() -> bool, raw_key: &dyn Fn(&MSG) -> bool) {
     unsafe {
         if owner != 0 {
             EnableWindow(owner, 0);
@@ -282,6 +284,10 @@ pub fn modal_loop(owner: HWND, dialog: HWND, done: &dyn Fn() -> bool) {
             if r <= 0 {
                 PostQuitMessage(msg.wParam as i32);
                 break;
+            }
+            if (WM_KEYFIRST..=WM_KEYLAST).contains(&msg.message) && raw_key(&msg) {
+                DispatchMessageW(&msg);
+                continue;
             }
             if IsDialogMessageW(dialog, &mut msg) == 0 {
                 TranslateMessage(&msg);

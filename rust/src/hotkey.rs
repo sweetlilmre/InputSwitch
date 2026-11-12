@@ -33,11 +33,7 @@ impl Hotkey {
         if self.is_empty() {
             return "(none)".into();
         }
-        let mut parts: Vec<String> = Vec::new();
-        if self.mods & CONTROL != 0 { parts.push("Ctrl".into()); }
-        if self.mods & ALT != 0 { parts.push("Alt".into()); }
-        if self.mods & SHIFT != 0 { parts.push("Shift".into()); }
-        if self.mods & WIN != 0 { parts.push("Win".into()); }
+        let mut parts = modifier_names(self.mods);
         parts.push(display_key(self.vk));
         parts.join(" + ")
     }
@@ -78,6 +74,21 @@ impl Hotkey {
         };
         Hotkey { mods: mods & 0xF, vk }
     }
+}
+
+fn modifier_names(mods: u8) -> Vec<String> {
+    [(CONTROL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift"), (WIN, "Win")]
+        .iter()
+        .filter(|(bit, _)| mods & bit != 0)
+        .map(|(_, name)| name.to_string())
+        .collect()
+}
+
+/// Modifiers held so far, while a combination is being recorded: "Ctrl + Win + …".
+pub fn partial_display(mods: u8) -> String {
+    let mut parts = modifier_names(mods);
+    parts.push("…".into());
+    parts.join(" + ")
 }
 
 /// .NET `Keys` names (first entry per key is the one written; extra entries are accepted aliases).

@@ -1,12 +1,14 @@
-//! The hotkey editor: a modal window to choose the monitor, the key combination (Windows' own
-//! hotkey control) and the inputs to switch between.
+//! The hotkey editor: a modal window to choose the monitor, the key combination (recorded by
+//! `hotkey_box`, Win key included) and the inputs to switch between.
 
 use crate::config::{Binding, Profile, ProfileMonitor};
 use crate::ffi::*;
-use crate::hotkey::{self, Hotkey};
+use crate::hotkey::Hotkey;
+use crate::hotkey_box;
 use crate::monitors;
 use crate::ui::{self, Fonts};
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicIsize, Ordering};
 
 const CLASS: &str = "InputSwitch.Editor";
 const ID_MONITOR: i32 = 200;
@@ -18,11 +20,10 @@ const ID_CODE: i32 = 205;
 const ID_ADD_CODE: i32 = 206;
 
 const WIDTH: i32 = 480;
-const HEIGHT: i32 = 470;
+const HEIGHT: i32 = 484;
 
 struct Controls {
     monitor: HWND,
-    hotkey: HWND,
     inputs: HWND,
     code: HWND,
     summary: HWND,
@@ -36,8 +37,6 @@ struct Editor {
     /// Other bindings' hotkeys in this configuration, to refuse duplicates.
     taken: Vec<Hotkey>,
     existing: Option<Binding>,
-    /// What the hotkey control showed initially (so an unchanged Win combination is kept).
-    initial_control: usize,
     result: Option<Option<Binding>>,
 }
 
@@ -70,10 +69,9 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
         CreateWindowExW(ex, wide(CLASS).as_ptr(), wide(title).as_ptr(), style, x, y, w, h, owner, 0, hinstance(), core::ptr::null())
     };
 
+    LAST_FOCUS.store(0, Ordering::Relaxed);
     let fonts = Fonts::new(dpi);
-    let c = create_controls(hwnd, &fonts, dpi);
-    let initial = existing.map(|b| to_control(b.hotkey)).unwrap_or(0);
-    unsafe { SendMessageW(c.hotkey, HKM_SETHOTKEY, initial, 0) };
+    let c = create_controls(hwnd, &fonts, dpi, existing.map(|b| b.hotkey).unwrap_or_default());
 
     let taken = profile.bindings.iter().filter(|b| Some(&b.id) != existing.map(|e| &e.id)).map(|b| b.hotkey).collect();
     let names: Vec<String> = profile.monitors.iter().map(|m| format!("{}  ·  {}", m.name, m.model)).collect();
@@ -83,17 +81,16 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     STATE.with(|s| {
         *s.borrow_mut() = Some(Editor {
             hwnd, _fonts: fonts, c, monitors: profile.monitors.clone(), taken, existing: existing.cloned(),
-            initial_control: initial, result: None,
+            result: None,
         })
     });
     with(|e| {
         e.fill_inputs();
-        unsafe { SetFocus(e.c.hotkey) };
     });
 
     ui::modal_loop(owner, hwnd, &|| {
         STATE.with(|s| s.try_borrow().map(|g| g.as_ref().is_none_or(|e| e.result.is_some())).unwrap_or(false))
-    });
+    }, &hotkey_box::is_raw_key);
     let result = STATE.with(|s| s.borrow_mut().take()).and_then(|e| e.result.flatten());
     unsafe { DestroyWindow(hwnd) };
     result
@@ -118,12 +115,48 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             with(|e| e.result = Some(None));
             return 0;
         }
+        WM_CTLCOLORSTATIC => {
+            if let Some(brush) = hotkey_box::ctl_color(w as HDC, l as HWND) {
+                return brush;
+            }
+        }
+        // Like a dialog: remember which control had focus when the editor is deactivated, and put
+        // it back (initially, the Monitor list) when it's activated again.
+        WM_ACTIVATE => {
+            if loword(w) == 0 {
+                let f = GetFocus();
+                if f != 0 && IsChild(h, f) != 0 {
+                    LAST_FOCUS.store(f, Ordering::Relaxed);
+                }
+            } else {
+                restore_focus();
+            }
+            return 0;
+        }
+        WM_SETFOCUS => {
+            restore_focus();
+            return 0;
+        }
         _ => {}
     }
     DefWindowProcW(h, m, w, l)
 }
 
-fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
+/// Control to focus when the editor becomes active: the last one used, else the Monitor list.
+/// (Not the hotkey box: it starts listening only when the user clicks or tabs into it.)
+static LAST_FOCUS: AtomicIsize = AtomicIsize::new(0);
+
+fn restore_focus() {
+    let mut target = LAST_FOCUS.load(Ordering::Relaxed);
+    if target == 0 {
+        target = STATE.with(|s| s.try_borrow().ok().and_then(|g| g.as_ref().map(|e| e.c.monitor))).unwrap_or(0);
+    }
+    if target != 0 {
+        unsafe { SetFocus(target) };
+    }
+}
+
+fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> Controls {
     let n = f.normal;
     let p = |hw: HWND, x: i32, y: i32, w: i32, ht: i32| ui::place(hw, ui::scale(x, dpi), ui::scale(y, dpi), ui::scale(w, dpi), ui::scale(ht, dpi));
     let (m, w) = (16, WIDTH - 32);
@@ -133,54 +166,32 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
     p(monitor, m, 36, w, 240);
 
     p(ui::label(h, "Key combination", f.bold), m, 72, w, 20);
-    let hotkey = ui::child(h, "msctls_hotkey32", "", WS_TABSTOP, WS_EX_CLIENTEDGE, ID_HOTKEY, n);
+    // The hint under the box says whether it's listening; it wraps onto a second line.
+    let hint = ui::child(h, "STATIC", "", SS_NOPREFIX, 0, 0, n);
+    p(hint, m, 124, w, 34);
+    let hotkey = hotkey_box::create(h, ID_HOTKEY, n, initial, hint);
     p(hotkey, m, 94, w, 26);
-    unsafe {
-        // Plain keys and Shift+key aren't allowed: make them Ctrl+Alt+key instead.
-        SendMessageW(hotkey, HKM_SETRULES, HKCOMB_NONE | HKCOMB_S, (HOTKEYF_CONTROL | HOTKEYF_ALT) as LPARAM);
-    }
-    p(ui::label(h, "Click the box and press the keys: Ctrl and/or Alt with a key. Backspace clears it.", n), m, 124, w, 20);
 
-    p(ui::label(h, "Inputs", f.bold), m, 156, w, 20);
-    p(ui::label(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", n), m, 178, w, 20);
+    p(ui::label(h, "Inputs", f.bold), m, 170, w, 20);
+    p(ui::label(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", n), m, 192, w, 20);
     let inputs = ui::listview(h, ID_INPUTS, LVS_NOCOLUMNHEADER, LVS_EX_CHECKBOXES, n);
-    p(inputs, m, 202, w - 92, 150);
+    p(inputs, m, 216, w - 92, 150);
     ui::lv_add_column(inputs, 0, "Input", ui::scale(w - 92 - 24, dpi));
-    p(ui::button(h, "Move up", ID_UP, n), m + w - 84, 202, 84, 28);
-    p(ui::button(h, "Move down", ID_DOWN, n), m + w - 84, 236, 84, 28);
+    p(ui::button(h, "Move up", ID_UP, n), m + w - 84, 216, 84, 28);
+    p(ui::button(h, "Move down", ID_DOWN, n), m + w - 84, 250, 84, 28);
 
-    p(ui::label(h, "Other input code (hex):", n), m, 368, 150, 20);
+    p(ui::label(h, "Other input code (hex):", n), m, 382, 150, 20);
     let code = ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_CODE, n);
-    p(code, m + 156, 364, 70, 26);
-    p(ui::button(h, "Add", ID_ADD_CODE, n), m + 234, 363, 70, 28);
+    p(code, m + 156, 378, 70, 26);
+    p(ui::button(h, "Add", ID_ADD_CODE, n), m + 234, 377, 70, 28);
 
     let summary = ui::label(h, "", f.bold);
-    p(summary, m, 400, w, 20);
+    p(summary, m, 414, w, 20);
 
-    p(ui::child(h, "BUTTON", "Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, IDOK, n), WIDTH - 16 - 90 - 8 - 90, 428, 90, 28);
-    p(ui::button(h, "Cancel", IDCANCEL, n), WIDTH - 16 - 90, 428, 90, 28);
+    p(ui::child(h, "BUTTON", "Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, IDOK, n), WIDTH - 16 - 90 - 8 - 90, 442, 90, 28);
+    p(ui::button(h, "Cancel", IDCANCEL, n), WIDTH - 16 - 90, 442, 90, 28);
 
-    Controls { monitor, hotkey, inputs, code, summary }
-}
-
-const EXTENDED: &[u16] = &[0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x6F, 0x90];
-
-fn to_control(h: Hotkey) -> usize {
-    let mut f = 0u8;
-    if h.mods & hotkey::SHIFT != 0 { f |= HOTKEYF_SHIFT; }
-    if h.mods & hotkey::CONTROL != 0 { f |= HOTKEYF_CONTROL; }
-    if h.mods & hotkey::ALT != 0 { f |= HOTKEYF_ALT; }
-    if EXTENDED.contains(&h.vk) { f |= HOTKEYF_EXT; }
-    (h.vk & 0xFF) as usize | ((f as usize) << 8)
-}
-
-fn from_control(v: usize) -> Hotkey {
-    let f = ((v >> 8) & 0xFF) as u8;
-    let mut mods = 0;
-    if f & HOTKEYF_SHIFT != 0 { mods |= hotkey::SHIFT; }
-    if f & HOTKEYF_CONTROL != 0 { mods |= hotkey::CONTROL; }
-    if f & HOTKEYF_ALT != 0 { mods |= hotkey::ALT; }
-    Hotkey { mods, vk: (v & 0xFF) as u16 }
+    Controls { monitor, inputs, code, summary }
 }
 
 impl Editor {
@@ -257,12 +268,7 @@ impl Editor {
     }
 
     fn accept(&mut self) {
-        let control = unsafe { SendMessageW(self.c.hotkey, HKM_GETHOTKEY, 0, 0) } as usize & 0xFFFF;
-        // The control can't show the Win key; keep an existing Win combination if it wasn't changed.
-        let hk = match &self.existing {
-            Some(b) if control == self.initial_control => b.hotkey,
-            _ => from_control(control),
-        };
+        let hk = hotkey_box::value();
         let inputs = self.checked_inputs();
         let monitor = self.selected_monitor().map(|m| m.monitor_id.clone());
         let problem = if monitor.is_none() {
@@ -270,7 +276,7 @@ impl Editor {
         } else if hk.is_empty() {
             Some("Click the key combination box and press the keys to use.".into())
         } else if !hk.is_valid() {
-            Some("Use Ctrl and/or Alt with the key (or one of F13–F24).".into())
+            Some("Use Ctrl, Alt or Win with the key (or one of F13–F24).".into())
         } else if inputs.is_empty() {
             Some("Tick at least one input.".into())
         } else if self.taken.contains(&hk) {
@@ -282,6 +288,22 @@ impl Editor {
             ui::alert(self.hwnd, ui::Icon::Warning, "This hotkey isn't finished", &p);
             return;
         }
+
+        // Windows refuses combinations already owned by Windows or another app. (The tray app's
+        // own hotkeys are released while the settings window is open, so they don't count.)
+        if self.existing.as_ref().map(|b| b.hotkey) != Some(hk) && !can_register(self.hwnd, hk) {
+            ui::alert(self.hwnd, ui::Icon::Warning, &format!("{} is already in use", hk.display()),
+                "Windows or another app already uses this combination, so InputSwitch can't. Choose another one.");
+            return;
+        }
+        // Some Windows shortcuts are handled before any app sees them, even when registering works.
+        if let Some(what) = crate::reserved::windows_use(&hk) {
+            let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch. Use it anyway?", hk.display());
+            if !ui::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg) {
+                return;
+            }
+        }
+
         self.result = Some(Some(Binding {
             id: self.existing.as_ref().map(|b| b.id.clone()).unwrap_or_else(crate::sys::new_id),
             monitor_id: monitor.unwrap_or_default(),
@@ -303,15 +325,14 @@ impl Editor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hotkey_control_round_trip() {
-        let h = Hotkey { mods: hotkey::CONTROL | hotkey::ALT, vk: b'M' as u16 };
-        assert_eq!(from_control(to_control(h)), h);
-        let arrows = Hotkey { mods: hotkey::CONTROL, vk: 0x25 };
-        assert_eq!(from_control(to_control(arrows)), arrows);
+/// Whether Windows would let us register this hotkey: registers it briefly, then releases it.
+fn can_register(h: HWND, hk: Hotkey) -> bool {
+    const PROBE_ID: i32 = 0xBFFF;
+    unsafe {
+        if RegisterHotKey(h, PROBE_ID, hk.mods as u32 | MOD_NOREPEAT, hk.vk as u32) == 0 {
+            return false;
+        }
+        UnregisterHotKey(h, PROBE_ID);
     }
+    true
 }

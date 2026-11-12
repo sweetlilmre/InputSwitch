@@ -415,20 +415,48 @@ pub const NM_DBLCLK: u32 = (-3i32) as u32;
 pub const LVN_ITEMCHANGED: u32 = (-101i32) as u32;
 pub const LVN_ENDLABELEDITW: u32 = (-176i32) as u32;
 
-// Hotkey control.
-pub const HKM_SETHOTKEY: u32 = 0x0401;
-pub const HKM_GETHOTKEY: u32 = 0x0402;
-pub const HKM_SETRULES: u32 = 0x0403;
-pub const HOTKEYF_SHIFT: u8 = 0x1;
-pub const HOTKEYF_CONTROL: u8 = 0x2;
-pub const HOTKEYF_ALT: u8 = 0x4;
-pub const HOTKEYF_EXT: u8 = 0x8;
-pub const HKCOMB_NONE: usize = 0x1;
-pub const HKCOMB_S: usize = 0x2;
-
 pub const ICC_LISTVIEW_CLASSES: u32 = 0x0001;
-pub const ICC_HOTKEY_CLASS: u32 = 0x0040;
 pub const ICC_STANDARD_CLASSES: u32 = 0x4000;
+
+// Keyboard (for the hotkey capture box).
+pub const WM_ACTIVATE: u32 = 0x0006;
+pub const WM_SETFOCUS: u32 = 0x0007;
+pub const WM_KILLFOCUS: u32 = 0x0008;
+pub const WM_NCDESTROY: u32 = 0x0082;
+pub const WM_KEYFIRST: u32 = 0x0100;
+pub const WM_KEYDOWN: u32 = 0x0100;
+pub const WM_KEYUP: u32 = 0x0101;
+pub const WM_SYSKEYDOWN: u32 = 0x0104;
+pub const WM_SYSKEYUP: u32 = 0x0105;
+pub const WM_KEYLAST: u32 = 0x0109;
+pub const WM_CTLCOLORSTATIC: u32 = 0x0138;
+pub const ES_READONLY: u32 = 0x0800;
+pub const COLOR_WINDOW: i32 = 5;
+pub const COLOR_WINDOWTEXT: i32 = 8;
+pub const WH_KEYBOARD_LL: i32 = 13;
+pub const GA_ROOT: u32 = 2;
+pub const VK_BACK: u16 = 0x08;
+pub const VK_TAB: u16 = 0x09;
+pub const VK_RETURN: u16 = 0x0D;
+pub const VK_SHIFT: u16 = 0x10;
+pub const VK_CONTROL: u16 = 0x11;
+pub const VK_MENU: u16 = 0x12;
+pub const VK_ESCAPE: u16 = 0x1B;
+pub const VK_DELETE: u16 = 0x2E;
+pub const VK_LWIN: u16 = 0x5B;
+pub const VK_RWIN: u16 = 0x5C;
+
+#[repr(C)]
+pub struct KBDLLHOOKSTRUCT {
+    pub vkCode: u32,
+    pub scanCode: u32,
+    pub flags: u32,
+    pub time: u32,
+    pub dwExtraInfo: usize,
+}
+
+pub type HOOKPROC = unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT;
+pub type SUBCLASSPROC = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM, usize, usize) -> LRESULT;
 
 // Hotkeys.
 pub const MOD_NOREPEAT: u32 = 0x4000;
@@ -585,6 +613,32 @@ extern "system" {
     pub fn InitCommonControlsEx(icc: *const INITCOMMONCONTROLSEX) -> BOOL;
     pub fn TaskDialog(owner: HWND, inst: HINSTANCE, title: *const u16, main: *const u16, content: *const u16,
         buttons: u32, icon: *const u16, pressed: *mut i32) -> i32;
+    pub fn SetWindowSubclass(h: HWND, proc: SUBCLASSPROC, id: usize, data: usize) -> BOOL;
+    pub fn RemoveWindowSubclass(h: HWND, proc: SUBCLASSPROC, id: usize) -> BOOL;
+    pub fn DefSubclassProc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT;
+}
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn GetKeyState(vk: i32) -> i16;
+    pub fn GetFocus() -> HWND;
+    pub fn GetForegroundWindow() -> HWND;
+    pub fn GetAncestor(h: HWND, flags: u32) -> HWND;
+    pub fn HideCaret(h: HWND) -> BOOL;
+    pub fn IsChild(parent: HWND, h: HWND) -> BOOL;
+    pub fn InvalidateRect(h: HWND, r: *const RECT, erase: BOOL) -> BOOL;
+    pub fn GetSysColor(index: i32) -> u32;
+    pub fn GetSysColorBrush(index: i32) -> isize;
+    pub fn SetWindowsHookExW(kind: i32, proc: HOOKPROC, inst: HINSTANCE, thread: u32) -> isize;
+    pub fn UnhookWindowsHookEx(hook: isize) -> BOOL;
+    pub fn CallNextHookEx(hook: isize, code: i32, w: WPARAM, l: LPARAM) -> LRESULT;
+}
+
+#[link(name = "gdi32")]
+extern "system" {
+    pub fn SetBkColor(hdc: HDC, color: u32) -> u32;
+    pub fn SetTextColor(hdc: HDC, color: u32) -> u32;
+    pub fn CreateSolidBrush(color: u32) -> isize;
 }
 
 #[link(name = "uxtheme")]
