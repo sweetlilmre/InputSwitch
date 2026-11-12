@@ -1,6 +1,6 @@
 //! Hand-written Windows API bindings: only what InputSwitch uses, so no binding crates are needed.
 
-#![allow(non_snake_case, non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
+#![allow(non_snake_case, non_camel_case_types, clippy::upper_case_acronyms)]
 
 use core::ffi::c_void;
 
@@ -10,7 +10,6 @@ pub type HINSTANCE = isize;
 pub type HMENU = isize;
 pub type HICON = isize;
 pub type HFONT = isize;
-pub type HBITMAP = isize;
 pub type HMONITOR = isize;
 pub type HKEY = isize;
 pub type HDC = isize;
@@ -197,15 +196,6 @@ pub struct INITCOMMONCONTROLSEX {
 }
 
 #[repr(C)]
-pub struct ICONINFO {
-    pub fIcon: BOOL,
-    pub xHotspot: u32,
-    pub yHotspot: u32,
-    pub hbmMask: HBITMAP,
-    pub hbmColor: HBITMAP,
-}
-
-#[repr(C)]
 pub struct MONITORINFOEXW {
     pub cbSize: u32,
     pub rcMonitor: RECT,
@@ -312,7 +302,6 @@ pub struct DISPLAYCONFIG_SOURCE_DEVICE_NAME {
 // Window messages.
 pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SIZE: u32 = 0x0005;
-pub const WM_SETFOCUS: u32 = 0x0007;
 pub const WM_CLOSE: u32 = 0x0010;
 pub const WM_GETMINMAXINFO: u32 = 0x0024;
 pub const WM_SETFONT: u32 = 0x0030;
@@ -321,7 +310,6 @@ pub const WM_CONTEXTMENU: u32 = 0x007B;
 pub const WM_DISPLAYCHANGE: u32 = 0x007E;
 pub const WM_COMMAND: u32 = 0x0111;
 pub const WM_TIMER: u32 = 0x0113;
-pub const WM_LBUTTONUP: u32 = 0x0202;
 pub const WM_POWERBROADCAST: u32 = 0x0218;
 pub const WM_DEVICECHANGE: u32 = 0x0219;
 pub const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
@@ -344,13 +332,11 @@ pub const WS_CAPTION: u32 = 0x00C0_0000;
 pub const WS_SYSMENU: u32 = 0x0008_0000;
 pub const WS_VSCROLL: u32 = 0x0020_0000;
 pub const WS_TABSTOP: u32 = 0x0001_0000;
-pub const WS_GROUP: u32 = 0x0002_0000;
 pub const WS_EX_CLIENTEDGE: u32 = 0x0000_0200;
 pub const WS_EX_DLGMODALFRAME: u32 = 0x0000_0001;
 pub const WS_EX_CONTROLPARENT: u32 = 0x0001_0000;
 pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
 
-pub const SW_HIDE: i32 = 0;
 pub const SW_SHOW: i32 = 5;
 pub const SW_RESTORE: i32 = 9;
 
@@ -482,7 +468,6 @@ pub const TDCBF_YES_BUTTON: u32 = 0x2;
 pub const TDCBF_NO_BUTTON: u32 = 0x4;
 pub const TDCBF_CANCEL_BUTTON: u32 = 0x8;
 pub const TD_WARNING_ICON: *const u16 = 0xFFFF as *const u16;
-pub const TD_ERROR_ICON: *const u16 = 0xFFFE as *const u16;
 pub const TD_INFORMATION_ICON: *const u16 = 0xFFFD as *const u16;
 
 // Registry.
@@ -525,7 +510,6 @@ extern "system" {
     pub fn GetWindowTextLengthW(h: HWND) -> i32;
     pub fn SetForegroundWindow(h: HWND) -> BOOL;
     pub fn SetActiveWindow(h: HWND) -> HWND;
-    pub fn IsWindow(h: HWND) -> BOOL;
     pub fn IsIconic(h: HWND) -> BOOL;
     pub fn SetFocus(h: HWND) -> HWND;
     pub fn LoadCursorW(inst: HINSTANCE, name: *const u16) -> isize;
@@ -549,7 +533,7 @@ extern "system" {
     pub fn GetDpiForWindow(h: HWND) -> u32;
     pub fn GetDpiForSystem() -> u32;
     pub fn AdjustWindowRectExForDpi(r: *mut RECT, style: u32, menu: BOOL, ex: u32, dpi: u32) -> BOOL;
-    pub fn CreateIconIndirect(info: *const ICONINFO) -> HICON;
+    pub fn LoadImageW(inst: HINSTANCE, name: *const u16, kind: u32, cx: i32, cy: i32, flags: u32) -> isize;
     pub fn DestroyIcon(h: HICON) -> BOOL;
     pub fn GetSystemMetrics(i: i32) -> i32;
 }
@@ -559,7 +543,6 @@ extern "system" {
     pub fn CreateFontW(h: i32, w: i32, esc: i32, orient: i32, weight: i32, italic: u32, underline: u32, strike: u32,
         charset: u32, out_prec: u32, clip_prec: u32, quality: u32, pitch: u32, face: *const u16) -> HFONT;
     pub fn DeleteObject(o: isize) -> BOOL;
-    pub fn CreateBitmap(w: i32, h: i32, planes: u32, bpp: u32, bits: *const c_void) -> HBITMAP;
 }
 
 #[link(name = "kernel32")]

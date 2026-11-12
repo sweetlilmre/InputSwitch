@@ -33,8 +33,11 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 
 - `src/ffi.rs` declares, by hand, only the Windows API functions, structures and constants that are used. The libraries are user32, gdi32, shell32, dxva2, advapi32, comctl32, uxtheme, wtsapi32 and bcrypt, all part of Windows.
 - `src/json.rs` is a small JSON reader and writer for the settings file.
-- `build.rs` embeds `app.manifest` (Common Controls 6 and per-monitor DPI awareness) through the MSVC linker, and records the git commit, without any build dependencies.
-- The tray icon is drawn in code; there's no `.ico` file.
+- `build.rs` does three things, without any build dependencies or a resource compiler:
+  - embeds `app.manifest` (Common Controls 6 and per-monitor DPI awareness) through the MSVC linker;
+  - writes a Windows resource file holding the icon and version information, so the exe shows as **InputSwitch** with its icon in notifications, Explorer and Task Manager;
+  - records the git commit.
+- `assets/InputSwitch.ico` is the app icon: the same artwork as the C# app, at 16–64 px. The tray and window icons are loaded from the exe's resources.
 - The release profile optimises for size: `opt-level = "z"`, LTO, one codegen unit, abort on panic, symbols stripped.
 
 | File | Contents |

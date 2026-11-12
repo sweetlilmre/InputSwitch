@@ -7,6 +7,7 @@
 // Usage:
 //   WindowCapture --pid <id> [--title <exact title>] --out <file.png>
 //   WindowCapture --pid <id> --list
+//   WindowCapture --monitor --out <file.png>     (the primary monitor, e.g. for notifications)
 //
 // Windows are searched in z-order (front to back), so when a dialog and its owner share a title,
 // the dialog, which is in front, is the one captured.
@@ -22,7 +23,7 @@ using WinRT;
 
 int? pid = null;
 string? title = null, output = null;
-bool list = false;
+bool list = false, monitor = false;
 for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -31,11 +32,13 @@ for (int i = 0; i < args.Length; i++)
         case "--title": title = args[++i]; break;
         case "--out": output = args[++i]; break;
         case "--list": list = true; break;
+        case "--monitor": monitor = true; break;
         default: return Fail($"Unknown argument: {args[i]}");
     }
 }
+if (monitor && output is not null) { Native.SetProcessDpiAwarenessContext(-4); return await Capture(CaptureInterop.CreateItemForMonitor(Native.PrimaryMonitor()), output, "primary monitor"); }
 if (pid is null || (!list && output is null))
-    return Fail("Usage: WindowCapture --pid <id> [--title <title>] --out <file.png>  |  --pid <id> --list");
+    return Fail("Usage: WindowCapture --pid <id> [--title <title>] --out <file.png>  |  --pid <id> --list  |  --monitor --out <file.png>");
 
 Native.SetProcessDpiAwarenessContext(-4); // per-monitor v2, so sizes are real pixels
 
@@ -52,7 +55,10 @@ if (Native.IsIconic(target.Handle)) return Fail("The window is minimised; it can
 
 if (!GraphicsCaptureSession.IsSupported()) return Fail("Windows.Graphics.Capture isn't supported on this system.");
 
-var item = CaptureInterop.CreateItemForWindow(target.Handle);
+return await Capture(CaptureInterop.CreateItemForWindow(target.Handle), output!, target.Title);
+
+static async Task<int> Capture(GraphicsCaptureItem item, string output, string what)
+{
 using var device = CaptureInterop.CreateDevice();
 using var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, item.Size);
 using var session = pool.CreateCaptureSession(item);
@@ -84,10 +90,11 @@ using (var frame = await firstFrame.Task)
         await reader.LoadAsync((uint)stream.Size);
         reader.ReadBytes(bytes);
     }
-    await File.WriteAllBytesAsync(output!, bytes);
-    Console.WriteLine($"saved {bitmap.PixelWidth}x{bitmap.PixelHeight} \"{target.Title}\" -> {output}");
+    await File.WriteAllBytesAsync(output, bytes);
+    Console.WriteLine($"saved {bitmap.PixelWidth}x{bitmap.PixelHeight} \"{what}\" -> {output}");
 }
 return 0;
+}
 
 static int Fail(string message)
 {
@@ -111,6 +118,10 @@ internal static class Native
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(nint value);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(long point, uint flags);
+
+    /// <summary>The primary monitor (the one containing 0,0).</summary>
+    public static IntPtr PrimaryMonitor() => MonitorFromPoint(0, 1 /* MONITOR_DEFAULTTOPRIMARY */);
 
     /// <summary>Visible top-level windows of a process, front to back.</summary>
     public static List<WindowInfo> TopLevelWindows(int processId)
@@ -155,6 +166,15 @@ internal static class CaptureInterop
     private const int D3D_DRIVER_TYPE_WARP = 5;
     private const uint D3D11_CREATE_DEVICE_BGRA_SUPPORT = 0x20;
     private const uint D3D11_SDK_VERSION = 7;
+
+    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr monitor)
+    {
+        var interop = GraphicsCaptureItem.As<IGraphicsCaptureItemInterop>();
+        var iid = IGraphicsCaptureItemIid;
+        var pointer = interop.CreateForMonitor(monitor, ref iid);
+        try { return GraphicsCaptureItem.FromAbi(pointer); }
+        finally { Marshal.Release(pointer); }
+    }
 
     public static GraphicsCaptureItem CreateItemForWindow(IntPtr hwnd)
     {

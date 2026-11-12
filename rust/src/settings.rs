@@ -296,7 +296,12 @@ impl Controls {
     /// The controls that only make sense with a configuration selected.
     fn detail(&self) -> Vec<HWND> {
         vec![self.delete, self.name, self.enabled, self.monitors, self.rename, self.detect, self.add_connected,
-            self.remove_monitor, self.hotkeys, self.add_hotkey, self.edit_hotkey, self.remove_hotkey, self.test_hotkey]
+            self.remove_monitor, self.hotkeys, self.add_hotkey]
+    }
+
+    /// The buttons that act on the selected hotkey.
+    fn hotkey_actions(&self) -> [HWND; 3] {
+        [self.edit_hotkey, self.remove_hotkey, self.test_hotkey]
     }
 }
 
@@ -440,6 +445,7 @@ impl Settings {
             ui::set_text(self.c.status, text);
             ui::lv_clear(self.c.monitors);
             ui::lv_clear(self.c.hotkeys);
+            self.update_hotkey_buttons();
             return;
         };
         let (name, enabled) = (self.config.profiles[i].name.clone(), self.config.profiles[i].enabled);
@@ -695,6 +701,15 @@ impl Settings {
             let monitor = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "(removed monitor)".into());
             ui::lv_add(self.c.hotkeys, &[b.hotkey.display(), monitor, monitors::describe_action(&b.inputs)], row as isize);
         }
+        self.update_hotkey_buttons();
+    }
+
+    /// Edit, Remove and Test are only available while a hotkey is selected.
+    fn update_hotkey_buttons(&self) {
+        let on = self.sel.is_some() && ui::lv_selected(self.c.hotkeys).is_some();
+        for h in self.c.hotkey_actions() {
+            ui::enable(h, on);
+        }
     }
 
     fn selected_binding(&self) -> Option<usize> {
@@ -800,6 +815,10 @@ impl Settings {
             (ID_HOTKEYS, NM_DBLCLK) => {
                 self.edit_hotkey();
                 Some(0)
+            }
+            (ID_HOTKEYS, LVN_ITEMCHANGED) => {
+                self.update_hotkey_buttons();
+                None
             }
             _ => None,
         }

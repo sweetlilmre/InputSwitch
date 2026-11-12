@@ -238,11 +238,9 @@ pub fn lv_set_checked(h: HWND, row: i32, on: bool) {
 // ------------------------------------------------------------------------------------------ dialogs
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum Icon {
     Info,
     Warning,
-    Error,
 }
 
 fn td(owner: HWND, icon: *const u16, main: &str, content: &str, buttons: u32) -> i32 {
@@ -257,7 +255,6 @@ pub fn alert(owner: HWND, icon: Icon, main: &str, content: &str) {
     let i = match icon {
         Icon::Info => TD_INFORMATION_ICON,
         Icon::Warning => TD_WARNING_ICON,
-        Icon::Error => TD_ERROR_ICON,
     };
     td(owner, i, main, content, TDCBF_OK_BUTTON);
 }
@@ -300,42 +297,10 @@ pub fn modal_loop(owner: HWND, dialog: HWND, done: &dyn Fn() -> bool) {
 
 // ------------------------------------------------------------------------------------------ icon
 
-/// Draws the app icon (a blue monitor with two swap arrows) at the small-icon size.
+/// The app icon: resource 1, written into the exe by build.rs from `assets/InputSwitch.ico` (the C#
+/// app's artwork). Loaded at the small-icon (tray) size; Windows picks the best frame.
 pub fn app_icon() -> HICON {
-    let n = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64) as usize;
-    let s = n as f32 / 16.0;
-    let mut px = vec![0u8; n * n * 4];
-    let mut fill = |x0: f32, y0: f32, x1: f32, y1: f32, rgb: (u8, u8, u8), inside: &dyn Fn(f32, f32) -> bool| {
-        for y in (y0 * s) as usize..((y1 * s).ceil() as usize).min(n) {
-            for x in (x0 * s) as usize..((x1 * s).ceil() as usize).min(n) {
-                let (cx, cy) = ((x as f32 + 0.5) / s, (y as f32 + 0.5) / s);
-                if inside(cx, cy) {
-                    let i = (y * n + x) * 4;
-                    px[i..i + 4].copy_from_slice(&[rgb.2, rgb.1, rgb.0, 255]);
-                }
-            }
-        }
-    };
-    let white = (255, 255, 255);
-    let blue = (0, 120, 215);
-    let all = |_: f32, _: f32| true;
-    fill(1.0, 2.0, 15.0, 12.0, white, &all); // frame
-    fill(2.0, 3.0, 14.0, 11.0, blue, &all); // screen
-    fill(7.4, 12.0, 8.6, 14.0, white, &all); // stand
-    fill(4.5, 14.0, 11.5, 15.2, white, &all); // base
-    fill(4.0, 4.4, 10.5, 5.6, white, &all); // arrow → shaft
-    fill(10.0, 3.0, 12.6, 7.0, white, &|x, y| (y - 5.0).abs() <= 1.8 * (12.6 - x) / 2.6);
-    fill(5.5, 7.9, 12.0, 9.1, white, &all); // arrow ← shaft
-    fill(3.4, 6.5, 6.0, 10.5, white, &|x, y| (y - 8.5).abs() <= 1.8 * (x - 3.4) / 2.6);
-
-    let mask = vec![0u8; n.div_ceil(16) * 2 * n];
-    unsafe {
-        let color = CreateBitmap(n as i32, n as i32, 1, 32, px.as_ptr() as *const _);
-        let mono = CreateBitmap(n as i32, n as i32, 1, 1, mask.as_ptr() as *const _);
-        let info = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mono, hbmColor: color };
-        let icon = CreateIconIndirect(&info);
-        DeleteObject(color);
-        DeleteObject(mono);
-        icon
-    }
+    let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
+    // IMAGE_ICON = 1; resource id 1 as MAKEINTRESOURCE.
+    unsafe { LoadImageW(hinstance(), 1 as *const u16, 1, size, size, 0) }
 }
