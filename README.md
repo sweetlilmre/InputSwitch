@@ -15,11 +15,12 @@ InputSwitch also remembers each place you work. Your desk at work and your desk 
 - [Before you start](#before-you-start)
 - [Getting started](#getting-started)
 - [Work, home and anywhere else](#work-home-and-anywhere-else)
-- [The settings window](#the-settings-window)
+- [The main window](#the-main-window)
 - [Making a hotkey](#making-a-hotkey)
 - [The tray icon](#the-tray-icon)
 - [Notifications](#notifications)
 - [Something not working?](#something-not-working)
+- [Updating](#updating)
 - [Your settings and uninstalling](#your-settings-and-uninstalling)
 
 ---
@@ -37,14 +38,15 @@ It usually won't work with TVs, or through some docks, KVM switches and adapters
 
 1. **Download and run it.** From the project's **Releases** page, download the latest zip:
    - **`win-x64-full`** for most PCs. Everything is included, so there's nothing else to install.
-   - **`win-x64-slim`** is a much smaller download, if your PC already has the *.NET 10 Desktop Runtime* (if you're not sure, pick *full*).
+   - **`win-x64-slim`** is a much smaller download, if your PC already has the *.NET 10 Desktop Runtime* (if you're not sure, pick *full*). If the runtime is missing, the slim version says so when you start it and offers to download it. Installing it needs administrator rights, so on a company PC you may need IT's help.
    - **`win-arm64-full`** or **`win-arm64-slim`** for Arm laptops, such as Snapdragon models.
 
-   Unzip it to a folder of your choice and run `InputSwitch.exe`. It finds your monitors, makes a configuration for them called *Setup 1*, and opens the settings window.
+   Unzip it to a folder of your choice and run `InputSwitch.exe`. It finds your monitors, makes a configuration for them called *Setup 1*, and opens the main window.
 2. **Give it a name.** Click *Setup 1* at the top and type something like `Work`.
-3. **Add a hotkey.** Click **Add hotkey**, choose a monitor, click the *Key combination* box and press the keys you want, for example **Ctrl + Alt + M**. Then tick the inputs, for example **DisplayPort 1** and **HDMI 1**, and click **Save**.
-4. **Try it.** Click the ▷ button next to your new hotkey.
-5. **Click Save.** That's it. Press your hotkey from anywhere in Windows.
+3. **Add a hotkey.** Click **Add hotkey**, choose a monitor, then click in the *Key combination* box and press the keys you want, for example **Ctrl + Alt + M**. Then tick the inputs, for example **DisplayPort 1** and **HDMI 1**, and click **Save**. The hotkey works straight away.
+4. **Try it.** Press your hotkey, or click the ▷ button next to it.
+
+There's no Save button in the main window: every change is saved as you make it. Close the window when you're done.
 
 > **Tip:** before you try a hotkey, make sure something is plugged into the input you're switching to. Otherwise the screen shows "No signal" until you switch back.
 
@@ -59,7 +61,7 @@ InputSwitch recognises your monitors individually, even two of the same model, s
 - **Closing your laptop lid** doesn't confuse it. Neither does switching a monitor off, or switching it over to another computer.
 - **Away from a desk,** with no monitors plugged in, nothing is active.
 
-## The settings window
+## The main window
 
 **Click the tray icon** to open it.
 
@@ -71,10 +73,10 @@ InputSwitch recognises your monitors individually, even two of the same model, s
 - **Monitors** shows each monitor with the inputs it has. The highlighted one is the input it's showing now. You can rename a monitor, for example to `Left screen`.
   - **Detect inputs** checks again which inputs your monitors have.
   - **Add connected** adds a newly plugged-in monitor to this configuration.
-- **Hotkeys** lists your hotkeys. Use ▷ to try one, ✎ to change it, or 🗑 to remove it.
-- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, and **Save / Cancel**.
+- **Hotkeys** lists your hotkeys. Use ▷ to try one, ✎ to change it, or 🗑 to remove it (you're asked first).
+- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, and **Close**.
 
-Your hotkeys take a break while the settings window is open, so you can't switch a screen by accident. They come back when you close it.
+Changes are saved as you make them, and take effect straight away. Your hotkeys keep working while the window is open; they only pause while the hotkey editor is open, so a combination can't fire while you're recording it.
 
 ## Making a hotkey
 
@@ -88,8 +90,10 @@ Each hotkey controls one monitor. What it does depends on how many inputs you ti
 
 When choosing keys:
 
+- **Click in the *Key combination* box** to start recording. It says *Press the keys now…* while it's listening; then press the combination.
 - Use **Ctrl**, **Alt** or the **Windows key** with a letter or number, for example **Ctrl + Alt + M**.
 - **Backspace** clears the box if you change your mind.
+- Each combination can only be used once per configuration. If another hotkey already uses it, you're told when you click **Save**.
 - Some **Windows key** combinations are taken by Windows itself. If yours doesn't work, pick another.
 
 Use the ▲ ▼ buttons to change the order when stepping through three or more inputs.
@@ -98,7 +102,7 @@ Use the ▲ ▼ buttons to change the order when stepping through three or more 
 
 InputSwitch sits in the notification area as a small blue monitor with two arrows. If you can't see it, click the **^** arrow next to the clock.
 
-- **Click it** to open the settings window.
+- **Click it** to open the main window.
 - **Right-click it** for a menu where you can:
   - run any of your hotkeys,
   - switch a monitor to any input as a one-off,
@@ -120,13 +124,13 @@ InputSwitch pops up a short message when:
 
 - Check **DDC/CI** is on in the monitor's on-screen menu.
 - If you use a dock or adapter, try plugging the monitor in directly.
-- Open the settings window and click **Detect inputs**. If no inputs appear, the monitor isn't listening to the computer.
+- Open the main window and click **Detect inputs**. If no inputs appear, the monitor isn't listening to the computer.
 
 **My hotkey does nothing**
 
-- Right-click the tray icon. Does it show the right setup? If it says *(disabled)*, open the settings and tick **Hotkeys on**.
+- Right-click the tray icon. Does it show the right setup? If it says *(disabled)*, open the main window and tick **Hotkeys on**.
 - Another app might already use that key combination. Try a different one.
-- Hotkeys pause while the settings window is open.
+- Hotkeys pause while the hotkey editor is open.
 
 **It can't switch back**
 
@@ -141,6 +145,10 @@ Some monitors don't list every input. The [technical notes](docs/TECHNICAL.md#in
 That happens when you plug in a monitor it hasn't seen before. Either set up the new configuration, or delete it and use **Add connected** in your usual one.
 
 Still stuck? The [technical notes](docs/TECHNICAL.md#command-line-options) describe a diagnostic report you can send to whoever supports you.
+
+## Updating
+
+To move to a new version, right-click the tray icon and choose **Exit**. Then download the new zip from the **Releases** page and unzip it over your InputSwitch folder, replacing the old files, and start it again. Your configurations and hotkeys are kept: they're stored separately from the program. The tray menu shows which version you're running.
 
 ## Your settings and uninstalling
 

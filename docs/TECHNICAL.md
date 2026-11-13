@@ -46,7 +46,7 @@ The running app locks `InputSwitch.exe`, so exit it from the tray before rebuild
 
 ## Versioning and releases
 
-The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. The SDK derives the assembly and file versions from it, and appends the git commit to the informational version, e.g. `0.1.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the settings window's left-hand pane, and in the diagnostic report (`AppInfo.cs`).
+The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. The SDK derives the assembly and file versions from it, and appends the git commit to the informational version, e.g. `0.1.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the main window's left-hand pane, and in the diagnostic report (`AppInfo.cs`).
 
 Releases are **built once**. Every merge to `main` packages the release files, and tagging that commit publishes exactly those files, with nothing rebuilt.
 
@@ -160,7 +160,7 @@ A setup's **fingerprint** is the set of IDs of the connected *external* monitors
 
 1. returns a configuration whose monitor set **equals** the fingerprint (the first in list order if several);
 2. otherwise considers configurations whose monitor set is a **superset** of the fingerprint. This handles a monitor that's switched off, or one that drops off after being switched to another source. It prefers the currently active configuration, then the one with the fewest monitors, then the oldest;
-3. otherwise reports an unknown setup. `TrayApp` then creates a configuration for it with hotkeys disabled. On the very first run (no configurations at all) it opens the settings window; otherwise it shows a notification.
+3. otherwise reports an unknown setup. `TrayApp` then creates a configuration for it with hotkeys disabled. On the very first run (no configurations at all) it opens the main window; otherwise it shows a notification.
 
 An empty fingerprint (no external monitors) matches nothing and creates nothing.
 
@@ -170,7 +170,7 @@ Re-evaluation is triggered by `WM_DISPLAYCHANGE` and `WM_DEVICECHANGE`, received
 
 ### Hotkeys
 
-Hotkeys are registered with `RegisterHotKey` (with `MOD_NOREPEAT`) on the hidden window, and only for the active configuration when it's enabled. A combination must include Ctrl, Alt or Win, or be F13–F24. All hotkeys are unregistered while the settings window is open, so combinations can be recorded and an accidental press won't switch a screen.
+Hotkeys are registered with `RegisterHotKey` (with `MOD_NOREPEAT`) on the hidden window, and only for the active configuration when it's enabled. A combination must include Ctrl, Alt or Win, or be F13–F24. All hotkeys are unregistered while the hotkey editor is open (`ConfigWindow` raises `CapturingHotkey` around it), so combinations can be recorded and an accidental press won't switch a screen. They're registered again as soon as it closes. The editor opens with focus on the Monitor list; the key box only records once the user clicks or tabs into it.
 
 A binding with one input sets that input. With several inputs, it reads the current input and moves to the next in the list, wrapping around. If the monitor doesn't answer, as some don't right after a switch, it uses the input it last set. If the current input isn't in the list, it goes to the first.
 
@@ -178,9 +178,10 @@ A binding with one input sets that input. With several inputs, it reads the curr
 
 - **Tray, hotkeys and display detection** run on WinForms, and the WinForms message loop drives the app.
 - **Windows and dialogs** are WPF with the built-in **Fluent** theme (`Application.ThemeMode = System`), which follows the Windows light/dark setting and uses Mica on Windows 11. `ThemeMode` is marked experimental, so `WPF0001` is suppressed in the project file.
-- **WPF is loaded lazily.** `TrayApp` only talks to the settings window through `ISettingsWindow`, which contains no WPF types. That way the JIT doesn't load WPF assemblies until a window is first created (`WpfHost.EnsureInitialized`). `AppDialogs` does the same for dialogs shown outside a window, such as at startup.
-- **Keyboard input in the modeless settings window** relies on `ElementHost.EnableModelessKeyboardInterop`.
-- **The Cancel button in the modeless window closes it explicitly**, because `IsCancel` only closes modal dialogs.
+- **WPF is loaded lazily.** `TrayApp` only talks to the main window through `ISettingsWindow`, which contains no WPF types. That way the JIT doesn't load WPF assemblies until a window is first created (`WpfHost.EnsureInitialized`). `AppDialogs` does the same for dialogs shown outside a window, such as at startup.
+- **Keyboard input in the modeless main window** relies on `ElementHost.EnableModelessKeyboardInterop`.
+- **The main window saves as you go.** There's no draft and no Save button. After every change, `ConfigWindow` raises `Changed` with a copy of the configuration; `TrayApp` saves it, re-matches the active configuration, and re-registers the hotkeys. Typed names are committed 0.7 s after typing stops, and on close. While the window is open, the tray doesn't create new configurations or show "setup changed" notifications, so the list doesn't change under the user; that happens when it closes. Registration failures are only reported when they change, not on every edit.
+- **The Close button in the modeless window closes it explicitly**, because `IsCancel` only closes modal dialogs.
 - **WinForms and WPF share many type names**, so the project removes the global `System.Windows.Forms` and `System.Drawing` usings, and each file imports what it needs.
 
 ## The settings file
@@ -227,7 +228,7 @@ Stored at `%APPDATA%\InputSwitch\config.json`, or in the folder named by the `IN
 
 | Option | What it does |
 |---|---|
-| `--settings` | Starts with the settings window open. |
+| `--settings` | Starts with the main window open. |
 | `--diagnose [file]` | Writes a read-only report for each monitor: ID, model and serial, GDI device, current input, supported inputs and the raw capabilities string. It also shows the configuration that would match. With no file it opens in Notepad. It never changes an input. |
 
 ## Input codes reference

@@ -45,7 +45,8 @@ internal sealed partial class BindingEditorWindow : Window
             MonitorBox.SelectedIndex = 0;
         }
 
-        Loaded += (_, _) => _hotkey.Focus();
+        // Start on the Monitor list; the key box only records once the user clicks (or tabs) into it.
+        Loaded += (_, _) => MonitorBox.Focus();
     }
 
     private ProfileMonitor? SelectedMonitor => (MonitorBox.SelectedItem as MonitorItem)?.Monitor;
@@ -120,17 +121,23 @@ internal sealed partial class BindingEditorWindow : Window
         var hotkey = _hotkey.Hotkey;
         var inputs = CheckedInputs();
 
-        string? problem =
-            monitor is null ? "Choose a monitor." :
-            hotkey.IsEmpty ? "Click the key combination box and press the keys to use." :
-            !hotkey.IsValid ? "Use at least Ctrl, Alt or Win with the key (or one of F13–F24)." :
-            inputs.Count == 0 ? "Tick at least one input." :
-            _profile.Bindings.Any(b => b.Id != _existing?.Id && b.Hotkey == hotkey) ? $"{hotkey} is already used in this configuration." :
+        // Each problem gets a heading that describes it, rather than one heading for all of them.
+        (string Heading, string Message)? problem =
+            monitor is null
+                ? ("Choose a monitor", "Pick the monitor this hotkey should switch.") :
+            hotkey.IsEmpty
+                ? ("No key combination yet", "Click the key combination box and press the keys to use.") :
+            !hotkey.IsValid
+                ? ("That combination can't be used", "Use Ctrl, Alt or Win with the key (or one of F13–F24).") :
+            inputs.Count == 0
+                ? ("This hotkey isn't finished", "Tick at least one input.") :
+            _profile.Bindings.Any(b => b.Id != _existing?.Id && b.Hotkey == hotkey)
+                ? ($"{hotkey} is already in use", "Another hotkey in this configuration uses it. Choose a different combination, or change the other hotkey.") :
             null;
 
-        if (problem is not null)
+        if (problem is { } p)
         {
-            FluentDialog.Show(this, DialogIcon.Warning, "This hotkey isn't finished", problem);
+            FluentDialog.Show(this, DialogIcon.Warning, p.Heading, p.Message);
             return;
         }
 

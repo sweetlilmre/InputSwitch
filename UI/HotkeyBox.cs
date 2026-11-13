@@ -82,13 +82,23 @@ internal sealed class HotkeyBox : TextBox
         if (Keyboard.Modifiers == ModifierKeys.None) UpdateText();
     }
 
+    protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnGotKeyboardFocus(e);
+        UpdateText();
+    }
+
     protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
     {
         base.OnLostKeyboardFocus(e);
         UpdateText();
     }
 
-    private string Describe() => _hotkey.IsEmpty ? "Press a key combination…" : _hotkey.ToString();
+    /// <summary>The recorded combination, or a prompt that says whether the box is listening.</summary>
+    private string Describe() =>
+        !_hotkey.IsEmpty ? _hotkey.ToString() :
+        IsKeyboardFocused ? "Press the keys now…" :
+        "Click here to record a key combination";
 
     private void UpdateText() => Text = Describe();
 
