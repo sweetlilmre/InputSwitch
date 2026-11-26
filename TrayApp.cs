@@ -34,6 +34,7 @@ internal sealed class TrayApp : ApplicationContext
     public TrayApp(bool openSettings = false)
     {
         _config = ConfigStore.Load();
+        UI.UiTheme.Current = _config.Theme;
         bool firstRun = _config.Profiles.Count == 0;
 
         _icon = TrayIconFactory.Create();
@@ -206,6 +207,7 @@ internal sealed class TrayApp : ApplicationContext
     private void OnSettingsChanged(AppConfig edited)
     {
         _config = edited;
+        UI.UiTheme.Current = _config.Theme;
         Save();
 
         // Profiles may have been added, deleted or changed; keep the same one active if it still fits.

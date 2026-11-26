@@ -7,6 +7,15 @@ internal sealed class AppConfig
 {
     public List<Profile> Profiles { get; set; } = [];
     public bool ShowNotifications { get; set; } = true;
+    /// <summary>Light or dark windows. System follows the Windows setting; Light and Dark override it.</summary>
+    public AppTheme Theme { get; set; } = AppTheme.System;
+}
+
+internal enum AppTheme
+{
+    System,
+    Light,
+    Dark,
 }
 
 /// <summary>

@@ -177,7 +177,7 @@ A binding with one input sets that input. With several inputs, it reads the curr
 ### User interface
 
 - **Tray, hotkeys and display detection** run on WinForms, and the WinForms message loop drives the app.
-- **Windows and dialogs** are WPF with the built-in **Fluent** theme (`Application.ThemeMode = System`), which follows the Windows light/dark setting and uses Mica on Windows 11. `ThemeMode` is marked experimental, so `WPF0001` is suppressed in the project file.
+- **Windows and dialogs** are WPF with the built-in **Fluent** theme (`Application.ThemeMode`), which uses Mica on Windows 11. `ThemeMode` comes from the `Theme` setting: `System` follows the Windows light/dark setting, `Light` and `Dark` override it. The tray holds it in `UiTheme`, which has no WPF types, so WPF still loads only when a window opens. `ThemeMode` is marked experimental, so `WPF0001` is suppressed in the project file.
 - **WPF is loaded lazily.** `TrayApp` only talks to the main window through `ISettingsWindow`, which contains no WPF types. That way the JIT doesn't load WPF assemblies until a window is first created (`WpfHost.EnsureInitialized`). `AppDialogs` does the same for dialogs shown outside a window, such as at startup.
 - **Keyboard input in the modeless main window** relies on `ElementHost.EnableModelessKeyboardInterop`.
 - **The main window saves as you go.** There's no draft and no Save button. After every change, `ConfigWindow` raises `Changed` with a copy of the configuration; `TrayApp` saves it, re-matches the active configuration, and re-registers the hotkeys. Typed names are committed 0.7 s after typing stops, and on close. While the window is open, the tray doesn't create new configurations or show "setup changed" notifications, so the list doesn't change under the user; that happens when it closes. Registration failures are only reported when they change, not on every edit.
@@ -215,9 +215,12 @@ Stored at `%APPDATA%\InputSwitch\config.json`, or in the folder named by the `IN
       ]
     }
   ],
-  "ShowNotifications": true
+  "ShowNotifications": true,
+  "Theme": "System"
 }
 ```
+
+- `Theme` is `System` (follow Windows, the default when it's missing), `Light` or `Dark`. The **Dark mode** switch sets `Light` or `Dark`.
 
 - `SupportedInputs` and `Inputs` are VCP 0x60 codes in decimal (15 = `0x0F` DisplayPort 1, 17 = `0x11` HDMI 1).
 - `Key` is a `System.Windows.Forms.Keys` name. `Modifiers` is any combination of `Alt`, `Control`, `Shift` and `Win`.

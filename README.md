@@ -74,7 +74,7 @@ InputSwitch recognises your monitors individually, even two of the same model, s
   - **Detect inputs** checks again which inputs your monitors have.
   - **Add connected** adds a newly plugged-in monitor to this configuration.
 - **Hotkeys** lists your hotkeys. Use ▷ to try one, ✎ to change it, or 🗑 to remove it (you're asked first).
-- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, and **Close**.
+- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, **Dark mode** and **Close**. InputSwitch starts out matching Windows' light or dark setting; flip **Dark mode** to choose for yourself.
 
 Changes are saved as you make them, and take effect straight away. Your hotkeys keep working while the window is open; they only pause while the hotkey editor is open, so a combination can't fire while you're recording it.
 
