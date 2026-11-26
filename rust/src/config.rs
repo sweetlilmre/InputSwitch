@@ -112,7 +112,8 @@ impl Profile {
             id: v.str("Id").map(str::to_string).unwrap_or_else(crate::sys::new_id),
             name: v.str("Name").unwrap_or("Unnamed setup").to_string(),
             enabled: v.bool("Enabled").unwrap_or(false),
-            created_utc: v.str("CreatedUtc").unwrap_or("").to_string(),
+            // The C# app can't read an empty date, so a missing or blank one becomes "now".
+            created_utc: v.str("CreatedUtc").filter(|s| !s.trim().is_empty()).map(str::to_string).unwrap_or_else(crate::sys::utc_now),
             monitors: v.arr("Monitors").iter().map(|m| ProfileMonitor {
                 monitor_id: m.str("MonitorId").unwrap_or("").to_string(),
                 name: m.str("Name").unwrap_or("").to_string(),
@@ -217,5 +218,18 @@ mod tests {
         // And survives a round trip through our writer.
         let again = AppConfig::from_json(&json::parse(&json::write(&cfg.to_json())).unwrap());
         assert_eq!(again, cfg);
+    }
+
+    #[test]
+    fn missing_or_blank_dates_are_filled_in() {
+        // The C# app can't read an empty CreatedUtc, so Rust must never write one.
+        let text = r#"{ "Profiles": [ { "Id": "a", "Name": "No date" }, { "Id": "b", "Name": "Blank", "CreatedUtc": "  " },
+                                      { "Id": "c", "Name": "Null", "CreatedUtc": null } ] }"#;
+        let cfg = AppConfig::from_json(&json::parse(text).unwrap());
+        for p in &cfg.profiles {
+            assert!(p.created_utc.len() >= 20 && p.created_utc.ends_with('Z'), "{}: '{}'", p.name, p.created_utc);
+        }
+        let kept = AppConfig::from_json(&json::parse(r#"{ "Profiles": [ { "CreatedUtc": "2026-11-11T12:47:11.0827479Z" } ] }"#).unwrap());
+        assert_eq!(kept.profiles[0].created_utc, "2026-11-11T12:47:11.0827479Z");
     }
 }
