@@ -89,6 +89,7 @@ pub fn run(open_settings: bool) -> i32 {
             &format!("{e}\n\nInputSwitch will start with fresh settings. The unreadable file was kept as config.json.bad in {}.", config::dir().display()));
     }
     let first_run = config.profiles.is_empty();
+    crate::theme::set_choice(config.theme);
 
     TRAY.with(|t| {
         *t.borrow_mut() = Some(Tray {
@@ -278,6 +279,7 @@ impl Tray {
             Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, None),
             Event::ConfigChanged(cfg) => {
                 self.config = cfg;
+                crate::theme::set_choice(self.config.theme);
                 self.save();
                 // Configurations may have been added, deleted or changed: keep the same one active
                 // if it still fits.

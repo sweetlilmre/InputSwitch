@@ -24,7 +24,7 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 
 ## What's different
 
-- **Look:** styled after the C# app's Fluent theme, with no UI framework. It follows the Windows light/dark setting and accent colour, live, until you flip the **Dark mode** switch at the bottom of the main window; that choice is remembered in `HKCU\Software\InputSwitch` (value `Theme`), not in `config.json`, so the file stays shared with the C# app. The look: dark title bars, a layered content area with rounded cards, a coloured status banner, a two-line configuration list, and owner-drawn rounded buttons and checkboxes with Segoe Fluent Icons. The remaining differences: no Mica backdrop, the tick boxes inside list views stay light, and confirmations (`TaskDialog`) stay light because Windows doesn't theme them. Dark list views, edit boxes, scroll bars and menus use uxtheme functions that are only exported by ordinal (undocumented, but used by Explorer and Notepad++); if they're missing, those controls stay light.
+- **Look:** styled after the C# app's Fluent theme, with no UI framework. It follows the Windows light/dark setting and accent colour, live, until you flip the **Dark mode** switch at the bottom of the main window; that choice is saved as `Theme` in `config.json` (`System`, `Light` or `Dark`), the same setting the C# app uses. The look: dark title bars, a layered content area with rounded cards, a coloured status banner, a two-line configuration list, and owner-drawn rounded buttons and checkboxes with Segoe Fluent Icons. The remaining differences: no Mica backdrop, the tick boxes inside list views stay light, and confirmations (`TaskDialog`) stay light because Windows doesn't theme them. Dark list views, edit boxes, scroll bars and menus use uxtheme functions that are only exported by ordinal (undocumented, but used by Explorer and Notepad++); if they're missing, those controls stay light.
 - **Dialogs:** Windows' own `TaskDialog`. Confirmations offer Yes / No rather than buttons labelled "Delete" or "Remove".
 - **Recording a hotkey:** click the box to start recording (it turns blue while it's listening). Win-key combinations are recorded too: while the box is listening, a short-lived keyboard hook stops Windows acting on the Win key. On Save, the editor refuses combinations Windows or another app already owns, and warns about known Windows shortcuts (such as Ctrl + Win + M for Magnifier), which Windows handles before any app sees them.
 - **Renaming a monitor:** done in place in the list (select it and press **Rename**, or F2).
@@ -61,7 +61,7 @@ You need Rust (stable, MSVC toolchain).
 ```
 cd rust
 cargo build --release          # target\release\InputSwitch.exe
-cargo test --release           # 22 unit tests
+cargo test --release           # 23 unit tests
 pwsh ..\tests\launch-smoke.ps1 -Exe target\release\InputSwitch.exe
 ```
 

@@ -8,11 +8,41 @@ use std::path::PathBuf;
 pub struct AppConfig {
     pub profiles: Vec<Profile>,
     pub show_notifications: bool,
+    pub theme: Theme,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        AppConfig { profiles: Vec::new(), show_notifications: true }
+        AppConfig { profiles: Vec::new(), show_notifications: true, theme: Theme::System }
+    }
+}
+
+/// Light or dark windows. System follows the Windows setting (and is what older files get);
+/// Light and Dark override it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    fn name(self) -> &'static str {
+        match self {
+            Theme::System => "System",
+            Theme::Light => "Light",
+            Theme::Dark => "Dark",
+        }
+    }
+
+    /// Case-insensitive, like the C# reader; anything else follows Windows.
+    fn parse(s: Option<&str>) -> Theme {
+        match s.map(str::to_ascii_lowercase).as_deref() {
+            Some("light") => Theme::Light,
+            Some("dark") => Theme::Dark,
+            _ => Theme::System,
+        }
     }
 }
 
@@ -73,6 +103,7 @@ impl AppConfig {
         Json::Obj(vec![
             ("Profiles".into(), Json::Arr(self.profiles.iter().map(Profile::to_json).collect())),
             ("ShowNotifications".into(), Json::Bool(self.show_notifications)),
+            ("Theme".into(), s(self.theme.name())),
         ])
     }
 
@@ -80,6 +111,7 @@ impl AppConfig {
         AppConfig {
             profiles: v.arr("Profiles").iter().map(Profile::from_json).collect(),
             show_notifications: v.bool("ShowNotifications").unwrap_or(true),
+            theme: Theme::parse(v.str("Theme")),
         }
     }
 }
@@ -206,7 +238,7 @@ mod tests {
                               "Serial": "BPG5ZT2", "SupportedInputs": [ 1, 15, 17 ] } ],
               "Bindings": [ { "Id": "ad46", "MonitorId": "DELD0D9#BPG5ZT2",
                               "Hotkey": { "Modifiers": "Alt, Control", "Key": "M" }, "Inputs": [ 15, 17 ] } ] } ],
-          "ShowNotifications": true }"#;
+          "ShowNotifications": true, "Theme": "Dark" }"#;
         let cfg = AppConfig::from_json(&json::parse(text).unwrap());
         let p = &cfg.profiles[0];
         assert_eq!(p.name, "Work");
@@ -214,6 +246,7 @@ mod tests {
         assert_eq!(p.monitors[0].supported_inputs, vec![1, 15, 17]);
         assert_eq!(p.bindings[0].hotkey, Hotkey { mods: ALT | CONTROL, vk: b'M' as u16 });
         assert_eq!(p.bindings[0].inputs, vec![15, 17]);
+        assert_eq!(cfg.theme, Theme::Dark);
 
         // And survives a round trip through our writer.
         let again = AppConfig::from_json(&json::parse(&json::write(&cfg.to_json())).unwrap());
@@ -231,5 +264,13 @@ mod tests {
         }
         let kept = AppConfig::from_json(&json::parse(r#"{ "Profiles": [ { "CreatedUtc": "2026-11-11T12:47:11.0827479Z" } ] }"#).unwrap());
         assert_eq!(kept.profiles[0].created_utc, "2026-11-11T12:47:11.0827479Z");
+    }
+
+    #[test]
+    fn theme_defaults_to_following_windows() {
+        let parse = |t: &str| AppConfig::from_json(&json::parse(t).unwrap()).theme;
+        assert_eq!(parse(r#"{ }"#), Theme::System);
+        assert_eq!(parse(r#"{ "Theme": "light" }"#), Theme::Light);
+        assert_eq!(parse(r#"{ "Theme": "Sepia" }"#), Theme::System);
     }
 }

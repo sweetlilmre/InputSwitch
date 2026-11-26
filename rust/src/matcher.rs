@@ -84,7 +84,7 @@ mod tests {
     }
 
     fn work_and_home() -> AppConfig {
-        AppConfig { profiles: vec![profile("Work", &["W#1", "W#2"]), profile("Home", &["H#1", "H#2"])], show_notifications: true }
+        AppConfig { profiles: vec![profile("Work", &["W#1", "W#2"]), profile("Home", &["H#1", "H#2"])], ..Default::default() }
     }
 
     #[test]
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn current_is_kept_then_fewest_monitors() {
-        let c = AppConfig { profiles: vec![profile("Big", &["A#1", "B#2", "C#3"]), profile("Small", &["A#1", "B#2"])], show_notifications: true };
+        let c = AppConfig { profiles: vec![profile("Big", &["A#1", "B#2", "C#3"]), profile("Small", &["A#1", "B#2"])], ..Default::default() };
         assert_eq!(find(&c, &set(&["A#1"]), None), Some(1));
         assert_eq!(find(&c, &set(&["A#1"]), Some("big")), Some(0));
     }

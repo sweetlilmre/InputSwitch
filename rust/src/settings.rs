@@ -525,6 +525,7 @@ impl Settings {
 
     /// Re-applies the palette after Windows switches between light and dark (or the accent changes).
     fn retheme(&mut self) {
+        widgets::set_checked(self.c.dark, theme::palette().dark);
         theme::apply_window(self.hwnd);
         theme::apply_control(self.c.monitors, theme::ControlKind::ListView);
         theme::apply_control(self.c.hotkeys, theme::ControlKind::ListView);
@@ -989,8 +990,10 @@ impl Settings {
             (ID_TEST_HOTKEY, BN_CLICKED) => self.test_hotkey(),
             (ID_STARTUP, BN_CLICKED) => self.set_startup(),
             (ID_DARK, BN_CLICKED) => {
-                theme::set_dark(widgets::checked(self.c.dark));
+                self.config.theme = if widgets::checked(self.c.dark) { crate::config::Theme::Dark } else { crate::config::Theme::Light };
+                theme::set_choice(self.config.theme); // re-theme straight away; the tray sets it again on save
                 self.retheme();
+                self.commit();
             }
             (ID_NOTIFY, BN_CLICKED) => {
                 self.config.show_notifications = widgets::checked(self.c.notify);
