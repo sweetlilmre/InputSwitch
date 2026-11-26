@@ -164,6 +164,14 @@ var tests = new List<(string Name, Action Body)>
         Assert.Sequence([0x0F, 0x11], w.Bindings[0].Inputs);
         Assert.Equal(2, copy.Profiles.Count);
     }),
+
+    ("Settings: the theme is kept, and older files follow Windows", () =>
+    {
+        var (config, _, _) = WorkAndHome();
+        Assert.Equal(AppTheme.System, config.Theme);
+        config.Theme = AppTheme.Dark;
+        Assert.Equal(AppTheme.Dark, ConfigStore.Clone(config).Theme);
+    }),
 };
 
 // ---------------------------------------------------------------- runner

@@ -46,7 +46,9 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         _loading = true;
         StartWithWindowsBox.IsChecked = Startup.IsEnabled;
         NotifyBox.IsChecked = _config.ShowNotifications;
+        DarkModeBox.IsChecked = UiTheme.IsDark;
         _loading = false;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         _typingTimer.Tick += (_, _) => Commit();
 
@@ -441,6 +443,22 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         Commit();
     }
 
+    /// <summary>The Dark mode switch: overrides the Windows setting from now on.</summary>
+    private void OnDarkModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _config.Theme = DarkModeBox.IsChecked == true ? AppTheme.Dark : AppTheme.Light;
+        UiTheme.Current = _config.Theme; // re-theme straight away; the tray sets it again on save
+        Commit();
+    }
+
+    /// <summary>While following Windows, keeps the switch showing the mode in use.</summary>
+    private void OnUserPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (_config.Theme != AppTheme.System) return;
+        Dispatcher.BeginInvoke(() => { _loading = true; DarkModeBox.IsChecked = UiTheme.IsDark; _loading = false; });
+    }
+
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
     protected override void OnClosing(CancelEventArgs e)
@@ -459,6 +477,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     protected override void OnClosed(EventArgs e)
     {
         _typingTimer.Stop();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         base.OnClosed(e);
     }
 

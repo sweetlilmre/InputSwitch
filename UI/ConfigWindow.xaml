@@ -2,7 +2,7 @@
         x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="InputSwitch" Width="1040" Height="740" MinWidth="820" MinHeight="560"
+        Title="InputSwitch" Width="1040" Height="740" MinWidth="880" MinHeight="560"
         WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
@@ -292,6 +292,7 @@
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <CheckBox x:Name="StartWithWindowsBox" Content="Start with Windows" Checked="OnStartWithWindowsChanged" Unchecked="OnStartWithWindowsChanged" />
                             <CheckBox x:Name="NotifyBox" Content="Notify when the setup changes" Margin="20,0,0,0" Checked="OnNotifyChanged" Unchecked="OnNotifyChanged" />
+                            <CheckBox x:Name="DarkModeBox" Content="Dark mode" Style="{StaticResource ToggleSwitch}" Margin="20,0,0,0" Checked="OnDarkModeChanged" Unchecked="OnDarkModeChanged" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
