@@ -183,6 +183,13 @@ pub fn listview(parent: HWND, id: i32, style: u32, ex_style: u32, font: HFONT) -
     h
 }
 
+/// Widens a list view's last (or only) column to the edge of the list, less any scroll bar, so
+/// no empty strip that looks like another column is left beside it.
+pub fn lv_fill_last_column(h: HWND, last: usize) {
+    const LVSCW_AUTOSIZE_USEHEADER: isize = -2;
+    unsafe { SendMessageW(h, LVM_SETCOLUMNWIDTH, last, LVSCW_AUTOSIZE_USEHEADER) };
+}
+
 pub fn lv_add_column(h: HWND, index: i32, title: &str, width: i32) {
     let mut text = wide(title);
     let mut col: LVCOLUMNW = zeroed();

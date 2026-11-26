@@ -276,6 +276,7 @@ impl Editor {
             let row = ui::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize);
             ui::lv_set_checked(self.c.inputs, row, selected.contains(&code));
         }
+        ui::lv_fill_last_column(self.c.inputs, 0);
         self.update_summary();
     }
 
@@ -331,6 +332,7 @@ impl Editor {
         };
         let existing = (0..ui::lv_count(self.c.inputs)).find(|&r| ui::lv_param(self.c.inputs, r) as u8 == code);
         let row = existing.unwrap_or_else(|| ui::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize));
+        ui::lv_fill_last_column(self.c.inputs, 0); // a scroll bar may have appeared
         ui::lv_set_checked(self.c.inputs, row, true);
         ui::lv_select(self.c.inputs, row);
         ui::set_text(self.c.code, "");
