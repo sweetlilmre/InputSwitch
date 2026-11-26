@@ -179,18 +179,24 @@ pub fn update_connection(connected: Vec<MonitorInfo>, active: Option<String>) {
     });
 }
 
+/// Brings the main window forward, or the hotkey editor if it's open, and selects id.
+/// Uses the stored handle rather than the window's state: while the editor is open that state
+/// is in use (the editor runs from inside a main-window handler), so it can't be borrowed.
 pub fn select_and_focus(id: Option<String>) {
-    with(|s| {
-        if id.is_some() {
-            s.refresh_profiles(id.as_deref());
+    if id.is_some() {
+        with(|s| s.refresh_profiles(id.as_deref())); // skipped while the editor is open
+    }
+    let main = hwnd();
+    if main == 0 {
+        return;
+    }
+    unsafe {
+        if IsIconic(main) != 0 {
+            ShowWindow(main, SW_RESTORE);
         }
-        unsafe {
-            if IsIconic(s.hwnd) != 0 {
-                ShowWindow(s.hwnd, SW_RESTORE);
-            }
-            SetForegroundWindow(s.hwnd);
-        }
-    });
+        // The editor if it's open (it's owned by the main window), otherwise the main window.
+        SetForegroundWindow(GetLastActivePopup(main));
+    }
 }
 
 /// Closes the window without asking (the app is exiting).

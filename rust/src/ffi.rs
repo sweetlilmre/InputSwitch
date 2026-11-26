@@ -529,6 +529,7 @@ extern "system" {
     pub fn SetForegroundWindow(h: HWND) -> BOOL;
     pub fn SetActiveWindow(h: HWND) -> HWND;
     pub fn IsIconic(h: HWND) -> BOOL;
+    pub fn GetLastActivePopup(h: HWND) -> HWND;
     pub fn SetFocus(h: HWND) -> HWND;
     pub fn LoadCursorW(inst: HINSTANCE, name: *const u16) -> isize;
     pub fn RegisterHotKey(h: HWND, id: i32, mods: u32, vk: u32) -> BOOL;
