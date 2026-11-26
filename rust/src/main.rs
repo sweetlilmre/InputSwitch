@@ -14,8 +14,10 @@ mod monitors;
 mod reserved;
 mod settings;
 mod sys;
+mod theme;
 mod tray;
 mod ui;
+mod widgets;
 
 use ffi::*;
 use std::fmt::Write as _;
@@ -33,6 +35,7 @@ fn main() {
             dwICC: ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES,
         };
         InitCommonControlsEx(&icc);
+        theme::init_app();
 
         // One instance per config folder: a test copy with its own folder can run beside the real one.
         let name = wide(&format!(r"Local\InputSwitch-6d3f0b8e{}", config::instance_key()));

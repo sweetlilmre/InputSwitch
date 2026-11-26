@@ -11,7 +11,7 @@ use crate::config::{AppConfig, Binding, ProfileMonitor};
 use crate::ffi::*;
 use crate::monitors::{self, MonitorInfo};
 use crate::ui::{self, Fonts};
-use crate::{editor, matcher, sys, tray};
+use crate::{editor, matcher, sys, theme, tray, widgets};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -42,10 +42,12 @@ const ID_STARTUP: i32 = 115;
 const ID_NOTIFY: i32 = 116;
 
 /// Client size at 96 DPI.
-const WIDTH: i32 = 960;
-const HEIGHT: i32 = 640;
-const MIN_WIDTH: i32 = 840;
-const MIN_HEIGHT: i32 = 560;
+const WIDTH: i32 = 1000;
+const HEIGHT: i32 = 700;
+const MIN_WIDTH: i32 = 900;
+const MIN_HEIGHT: i32 = 620;
+/// Height of a two-line item in the configurations list, at 96 DPI.
+const PROFILE_ITEM_HEIGHT: i32 = 52;
 
 enum Bg {
     Detected { id: String, inputs: Vec<u8>, current: Option<u8> },
@@ -111,6 +113,7 @@ struct Settings {
     detecting: bool,
     /// A typed name is waiting to be committed (the typing timer is running).
     typing: bool,
+    regions: Regions,
 }
 
 thread_local! {
@@ -141,6 +144,7 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
             r.right - r.left, r.bottom - r.top, 0, 0, hinstance(), core::ptr::null())
     };
     HWND_SETTINGS.store(hwnd, Ordering::Relaxed);
+    theme::apply_window(hwnd);
 
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let fonts = Fonts::new(dpi);
@@ -148,12 +152,12 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     STATE.with(|s| {
         *s.borrow_mut() = Some(Settings {
             hwnd, dpi, fonts, c, config, connected, active, sel: None,
-            current: HashMap::new(), attempted: HashSet::new(), detecting: false, typing: false,
+            current: HashMap::new(), attempted: HashSet::new(), detecting: false, typing: false, regions: Regions::default(),
         })
     });
     with(|s| {
-        ui::set_checked(s.c.startup, sys::startup_enabled());
-        ui::set_checked(s.c.notify, s.config.show_notifications);
+        widgets::set_checked(s.c.startup, sys::startup_enabled());
+        widgets::set_checked(s.c.notify, s.config.show_notifications);
         s.refresh_profiles(select.as_deref());
         s.layout();
     });
@@ -199,6 +203,9 @@ pub fn destroy() {
 unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match m {
         WM_COMMAND => {
+            if hiword(w) == BN_CLICKED && l != 0 {
+                widgets::clicked(l as HWND); // checkboxes flip before the click is handled
+            }
             let after = with(|s| s.command(loword(w) as i32, hiword(w)));
             if let Some(After::Close) = after {
                 DestroyWindow(h);
@@ -233,6 +240,40 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             with(|s| s.dpi_changed(hiword(w) as u32, suggested));
             return 0;
         }
+        WM_ERASEBKGND => {
+            if with(|s| s.paint_background(w as HDC)).is_none() {
+                let mut rc = RECT::default();
+                GetClientRect(h, &mut rc);
+                theme::fill(w as HDC, rc, theme::palette().window);
+            }
+            return 1;
+        }
+        WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORBTN => {
+            if let Some(brush) = theme::ctl_color(m, w as HDC, l as HWND) {
+                return brush;
+            }
+        }
+        WM_MEASUREITEM => {
+            let mi = &mut *(l as *mut MEASUREITEMSTRUCT);
+            if mi.CtlType == ODT_LISTBOX {
+                mi.itemHeight = ui::scale(PROFILE_ITEM_HEIGHT, GetDpiForWindow(h).max(96)) as u32;
+                return 1;
+            }
+        }
+        WM_DRAWITEM => {
+            let dis = &*(l as *const DRAWITEMSTRUCT);
+            if widgets::draw(dis) {
+                return 1;
+            }
+            if dis.CtlType == ODT_LISTBOX {
+                with(|s| s.draw_profile(dis));
+                return 1;
+            }
+        }
+        WM_SETTINGCHANGE if theme::is_theme_change(m, l) => {
+            theme::reload();
+            with(|s| s.retheme());
+        }
         WM_POKE => {
             with(|s| s.drain());
             return 0;
@@ -254,35 +295,45 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
 }
 
 fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
+    use theme::Surface::{Banner, Card, Layer, Window};
     let n = f.normal;
-    let edit = |id| ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, id, f.title);
+    // The name box has no border of its own: a rounded frame is painted behind it.
+    let name = ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, 0, ID_NAME, f.title);
+    unsafe { SendMessageW(name, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, (ui::scale(8, dpi) | (ui::scale(8, dpi) << 16)) as LPARAM) };
+    theme::apply_control(name, theme::ControlKind::Edit);
+    // Two-line items (name, then status) drawn in WM_DRAWITEM.
+    let profiles = ui::child(h, "LISTBOX", "", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 0, ID_PROFILES, n);
+    theme::set_surface(profiles, Window, false);
+    theme::apply_control(profiles, theme::ControlKind::ListBox);
+    let saved_note = ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, n);
+    theme::set_surface(saved_note, Layer, true);
     let c = Controls {
-        configs_label: ui::label(h, "Configurations", f.bold),
-        profiles: ui::child(h, "LISTBOX", "", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_PROFILES, n),
-        new: ui::button(h, "New from current setup", ID_NEW, n),
-        delete: ui::button(h, "Delete configuration", ID_DELETE, n),
-        version: ui::label(h, &format!("Version {}", sys::display_version()), n),
-        name_label: ui::label(h, "Name:", n),
-        name: edit(ID_NAME),
-        enabled: ui::checkbox(h, "Hotkeys on — register this configuration's hotkeys whenever this setup is connected", ID_ENABLED, n),
-        status: ui::label(h, "", n),
-        monitors_label: ui::label(h, "Monitors", f.bold),
+        configs_label: ui::label_on(h, "Configurations", f.section, Window, false),
+        profiles,
+        new: widgets::button(h, "New from current setup", ID_NEW, Some(widgets::ICON_ADD), f, Window),
+        delete: widgets::button(h, "Delete configuration", ID_DELETE, Some(widgets::ICON_DELETE), f, Window),
+        version: ui::label_on(h, &format!("Version {}", sys::display_version()), n, Window, true),
+        name_label: ui::label_on(h, "Name:", n, Layer, true),
+        name,
+        enabled: widgets::checkbox(h, "Hotkeys on", ID_ENABLED, f, Banner),
+        status: ui::label_on(h, "", n, Banner, false),
+        monitors_label: ui::label_on(h, "Monitors", f.section, Card, false),
         monitors: ui::listview(h, ID_MONITORS, LVS_EDITLABELS, 0, n),
-        rename: ui::button(h, "Rename", ID_RENAME, n),
-        detect: ui::button(h, "Detect inputs", ID_DETECT, n),
-        add_connected: ui::button(h, "Add connected", ID_ADD_CONNECTED, n),
-        remove_monitor: ui::button(h, "Remove", ID_REMOVE_MONITOR, n),
-        hotkeys_label: ui::label(h, "Hotkeys", f.bold),
+        rename: widgets::button(h, "Rename", ID_RENAME, Some(widgets::ICON_RENAME), f, Card),
+        detect: widgets::button(h, "Detect inputs", ID_DETECT, Some(widgets::ICON_REFRESH), f, Card),
+        add_connected: widgets::button(h, "Add connected", ID_ADD_CONNECTED, Some(widgets::ICON_ADD), f, Card),
+        remove_monitor: widgets::button(h, "Remove", ID_REMOVE_MONITOR, Some(widgets::ICON_DELETE), f, Card),
+        hotkeys_label: ui::label_on(h, "Hotkeys", f.section, Card, false),
         hotkeys: ui::listview(h, ID_HOTKEYS, 0, 0, n),
-        add_hotkey: ui::button(h, "Add…", ID_ADD_HOTKEY, n),
-        edit_hotkey: ui::button(h, "Edit…", ID_EDIT_HOTKEY, n),
-        remove_hotkey: ui::button(h, "Remove", ID_REMOVE_HOTKEY, n),
-        test_hotkey: ui::button(h, "Test", ID_TEST_HOTKEY, n),
-        activity: ui::label(h, "", n),
-        startup: ui::checkbox(h, "Start with Windows", ID_STARTUP, n),
-        notify: ui::checkbox(h, "Notify when the setup changes", ID_NOTIFY, n),
-        saved_note: ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, n),
-        close: ui::button(h, "Close", IDCANCEL, n),
+        add_hotkey: widgets::accent_button(h, "Add hotkey", ID_ADD_HOTKEY, Some(widgets::ICON_ADD), f, Card),
+        edit_hotkey: widgets::button(h, "Edit", ID_EDIT_HOTKEY, Some(widgets::ICON_EDIT), f, Card),
+        remove_hotkey: widgets::button(h, "Remove", ID_REMOVE_HOTKEY, Some(widgets::ICON_DELETE), f, Card),
+        test_hotkey: widgets::button(h, "Test", ID_TEST_HOTKEY, Some(widgets::ICON_PLAY), f, Card),
+        activity: ui::label_on(h, "", n, Layer, true),
+        startup: widgets::checkbox(h, "Start with Windows", ID_STARTUP, f, Layer),
+        notify: widgets::checkbox(h, "Notify when the setup changes", ID_NOTIFY, f, Layer),
+        saved_note,
+        close: widgets::button(h, "Close", IDCANCEL, None, f, Layer),
     };
     let s = |v| ui::scale(v, dpi);
     for (i, (title, width)) in [("Name", 170), ("Model", 80), ("Serial", 100), ("Status", 95), ("Current input", 105), ("Available inputs", 250)].iter().enumerate() {
@@ -292,6 +343,26 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         ui::lv_add_column(c.hotkeys, i as i32, title, s(*width));
     }
     c
+}
+
+/// Sizes a list view's last column to the width the other columns leave.
+fn fill_last_column(list: HWND, last: usize) {
+    unsafe {
+        let mut rc = RECT::default();
+        GetClientRect(list, &mut rc);
+        let used: i32 = (0..last).map(|i| SendMessageW(list, LVM_GETCOLUMNWIDTH, i, 0) as i32).sum();
+        SendMessageW(list, LVM_SETCOLUMNWIDTH, last, (rc.right - used).max(ui::scale(80, GetDpiForWindow(list).max(96))) as LPARAM);
+    }
+}
+
+/// Areas painted behind the controls (in physical pixels): the content layer, the status
+/// banner, the two cards and the name box's frame.
+#[derive(Default)]
+struct Regions {
+    layer: RECT,
+    banner: RECT,
+    cards: [RECT; 2],
+    name_frame: RECT,
 }
 
 impl Controls {
@@ -317,65 +388,145 @@ impl Controls {
 impl Settings {
     // -------------------------------------------------------------------------------- layout
 
-    fn layout(&self) {
+    fn layout(&mut self) {
         let mut rc = RECT::default();
         unsafe { GetClientRect(self.hwnd, &mut rc) };
         let d = self.dpi.max(96) as i32;
         let (w, h) = (rc.right * 96 / d, rc.bottom * 96 / d);
-        let p = |hw: HWND, x: i32, y: i32, cw: i32, ch: i32| ui::place(hw, ui::scale(x, self.dpi), ui::scale(y, self.dpi), ui::scale(cw, self.dpi), ui::scale(ch, self.dpi));
+        let sc = |v: i32| ui::scale(v, self.dpi);
+        let p = |hw: HWND, x: i32, y: i32, cw: i32, ch: i32| ui::place(hw, sc(x), sc(y), sc(cw), sc(ch));
+        let r = |x: i32, y: i32, cw: i32, ch: i32| RECT { left: sc(x), top: sc(y), right: sc(x + cw), bottom: sc(y + ch) };
         let c = &self.c;
 
-        // Left: configurations.
-        let lw = 230;
-        p(c.configs_label, 12, 14, lw, 20);
-        let version_y = h - 12 - 18;
-        let delete_y = version_y - 10 - 28;
-        let new_y = delete_y - 6 - 28;
-        p(c.profiles, 12, 38, lw, new_y - 8 - 38);
-        p(c.new, 12, new_y, lw, 28);
-        p(c.delete, 12, delete_y, lw, 28);
-        p(c.version, 12, version_y, lw, 18);
+        // Left: the configurations, on the window background.
+        let lw = 236;
+        p(c.configs_label, 16, 16, lw, 26);
+        let version_y = h - 14 - 18;
+        let delete_y = version_y - 10 - 32;
+        let new_y = delete_y - 6 - 32;
+        p(c.profiles, 12, 50, lw, new_y - 10 - 50);
+        p(c.new, 12, new_y, lw, 32);
+        p(c.delete, 12, delete_y, lw, 32);
+        p(c.version, 16, version_y, lw, 18);
 
-        // Right: the selected configuration.
-        let rx = 12 + lw + 16;
-        let rw = w - rx - 12;
-        p(c.name_label, rx, 18, 48, 20);
-        p(c.name, rx + 52, 10, rw - 52, 34);
-        p(c.enabled, rx, 52, rw, 22);
-        p(c.status, rx, 78, rw, 20);
+        // Right: the selected configuration, on the content layer.
+        let x0 = 12 + lw + 12;
+        let rx = x0 + 24;
+        let re = w - 24;
+        let rw = re - rx;
+        let layer = r(x0, 0, w - x0, h);
 
-        let bottom = h - 12 - 28;
-        p(c.close, w - 12 - 90, bottom, 90, 28);
-        p(c.startup, rx, bottom + 4, 150, 22);
-        p(c.notify, rx + 158, bottom + 4, 230, 22);
-        p(c.activity, rx, bottom - 28, rw - 224, 20);
-        p(c.saved_note, w - 12 - 210, bottom - 28, 210, 20);
+        p(c.name_label, rx, 25, 48, 20);
+        let name_frame = r(rx + 52, 14, rw - 52, 40);
+        p(c.name, rx + 53, 19, rw - 54, 30);
 
-        let top = 108;
-        let end = bottom - 36;
-        let monitors_h = (end - top) * 45 / 100;
-        p(c.monitors_label, rx, top, rw, 20);
-        p(c.monitors, rx, top + 22, rw, monitors_h - 22 - 8 - 28 - 10);
-        let by = top + monitors_h - 28 - 10;
-        p(c.rename, rx, by, 90, 28);
-        p(c.detect, rx + 98, by, 110, 28);
-        p(c.add_connected, rx + 216, by, 130, 28);
-        p(c.remove_monitor, rx + 354, by, 90, 28);
+        // Status banner: the status on the left, "Hotkeys on" on the right.
+        let banner = r(rx, 64, rw, 46);
+        p(c.status, rx + 16, 64 + 13, rw - 32 - 150, 20);
+        p(c.enabled, re - 16 - 130, 64 + 11, 130, 24);
 
-        let hy = top + monitors_h;
-        p(c.hotkeys_label, rx, hy, rw, 20);
-        p(c.hotkeys, rx, hy + 22, rw, end - hy - 22 - 8 - 28);
-        let by = end - 28;
-        p(c.add_hotkey, rx, by, 90, 28);
-        p(c.edit_hotkey, rx + 98, by, 90, 28);
-        p(c.remove_hotkey, rx + 196, by, 90, 28);
-        p(c.test_hotkey, rx + 294, by, 90, 28);
+        // Footer.
+        let bottom = h - 16 - 32;
+        p(c.close, re - 100, bottom, 100, 32);
+        p(c.startup, rx, bottom + 4, 180, 24);
+        p(c.notify, rx + 190, bottom + 4, 260, 24);
+        p(c.activity, rx, bottom - 28, rw - 230, 20);
+        p(c.saved_note, re - 220, bottom - 28, 220, 20);
 
-        // The last column fills whatever width is left.
-        unsafe {
-            SendMessageW(c.monitors, LVM_SETCOLUMNWIDTH, 5, LVSCW_AUTOSIZE_USEHEADER);
-            SendMessageW(c.hotkeys, LVM_SETCOLUMNWIDTH, 2, LVSCW_AUTOSIZE_USEHEADER);
+        // Two cards: Monitors and Hotkeys.
+        let top = 126;
+        let end = bottom - 40;
+        let gap = 16;
+        let monitors_h = (end - top - gap) * 45 / 100;
+        let (cx, cw) = (rx + 16, rw - 32);
+        p(c.monitors_label, cx, top + 12, cw, 26);
+        p(c.monitors, cx, top + 44, cw, monitors_h - 44 - 12 - 32 - 12);
+        let by = top + monitors_h - 12 - 32;
+        p(c.rename, cx, by, 110, 32);
+        p(c.detect, cx + 118, by, 140, 32);
+        p(c.add_connected, cx + 266, by, 150, 32);
+        p(c.remove_monitor, cx + 424, by, 110, 32);
+
+        let hy = top + monitors_h + gap;
+        let hotkeys_h = end - hy;
+        p(c.hotkeys_label, cx, hy + 12, cw, 26);
+        p(c.hotkeys, cx, hy + 44, cw, hotkeys_h - 44 - 12 - 32 - 12);
+        let by = end - 12 - 32;
+        p(c.add_hotkey, cx, by, 130, 32);
+        p(c.edit_hotkey, cx + 138, by, 100, 32);
+        p(c.remove_hotkey, cx + 246, by, 110, 32);
+        p(c.test_hotkey, cx + 364, by, 100, 32);
+
+        self.regions = Regions { layer, banner, cards: [r(rx, top, rw, monitors_h), r(rx, hy, rw, hotkeys_h)], name_frame };
+
+        // The last column fills whatever width is left (exactly, so there's no horizontal scroll bar).
+        fill_last_column(c.monitors, 5);
+        fill_last_column(c.hotkeys, 2);
+        unsafe { RedrawWindow(self.hwnd, core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE) };
+    }
+
+    /// Paints the window background, the content layer, the cards, the banner and the name frame.
+    fn paint_background(&self, hdc: HDC) {
+        let p = theme::palette();
+        let mut rc = RECT::default();
+        unsafe { GetClientRect(self.hwnd, &mut rc) };
+        theme::fill(hdc, rc, p.window);
+        let g = &self.regions;
+        let radius = ui::scale(8, self.dpi);
+        // Only the layer's top-left corner is rounded: extend it past the window's other edges.
+        let layer = RECT { right: g.layer.right + radius * 2, bottom: g.layer.bottom + radius * 2, ..g.layer };
+        theme::round_rect(hdc, layer, radius, p.layer, Some(p.stroke));
+        for card in g.cards {
+            theme::round_rect(hdc, card, radius, p.card, Some(p.stroke));
         }
+        theme::round_rect(hdc, g.banner, ui::scale(6, self.dpi), theme::color_of(theme::Surface::Banner), None);
+        theme::round_rect(hdc, g.name_frame, ui::scale(4, self.dpi), p.control, Some(p.control_stroke));
+    }
+
+    /// Draws one configuration in the list: an icon, the name, and its status underneath.
+    fn draw_profile(&self, dis: &DRAWITEMSTRUCT) {
+        if dis.itemID == u32::MAX {
+            return;
+        }
+        let p = theme::palette();
+        let hdc = dis.hDC;
+        let r = dis.rcItem;
+        let sc = |v: i32| ui::scale(v, self.dpi);
+        let text = unsafe {
+            let n = SendMessageW(self.c.profiles, LB_GETTEXTLEN, dis.itemID as usize, 0).max(0) as usize;
+            let mut buf = vec![0u16; n + 1];
+            SendMessageW(self.c.profiles, LB_GETTEXT, dis.itemID as usize, buf.as_mut_ptr() as LPARAM);
+            from_wide(&buf)
+        };
+        let (title, subtitle) = text.split_once('\t').unwrap_or((&text, ""));
+        let selected = dis.itemState & ODS_SELECTED != 0;
+        let connected = subtitle.starts_with("Connected");
+
+        theme::fill(hdc, r, p.window);
+        let pill = RECT { left: r.left + sc(2), top: r.top + sc(2), right: r.right - sc(2), bottom: r.bottom - sc(2) };
+        if selected {
+            theme::round_rect(hdc, pill, sc(5), p.selected, None);
+            let bar_h = sc(16);
+            let mid = (pill.top + pill.bottom) / 2;
+            theme::round_rect(hdc, RECT { left: pill.left, top: mid - bar_h / 2, right: pill.left + sc(3), bottom: mid + bar_h / 2 }, sc(2), p.accent, None);
+        }
+        let icon = RECT { left: pill.left + sc(12), top: pill.top, right: pill.left + sc(36), bottom: pill.bottom };
+        theme::text(hdc, "\u{E7F4}", icon, self.fonts.icon, if connected { p.accent } else { p.text2 }, DT_VCENTER | DT_SINGLELINE);
+        let tx = pill.left + sc(40);
+        let mid = (pill.top + pill.bottom) / 2;
+        theme::text(hdc, title, RECT { left: tx, top: pill.top + sc(4), right: pill.right - sc(8), bottom: mid + sc(1) }, self.fonts.normal, p.text, DT_SINGLELINE | DT_END_ELLIPSIS | 0x0008 /* DT_BOTTOM */);
+        theme::text(hdc, subtitle, RECT { left: tx, top: mid + sc(1), right: pill.right - sc(8), bottom: pill.bottom - sc(4) }, self.fonts.normal, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    /// Re-applies the palette after Windows switches between light and dark (or the accent changes).
+    fn retheme(&mut self) {
+        theme::apply_window(self.hwnd);
+        theme::apply_control(self.c.monitors, theme::ControlKind::ListView);
+        theme::apply_control(self.c.hotkeys, theme::ControlKind::ListView);
+        theme::apply_control(self.c.profiles, theme::ControlKind::ListBox);
+        theme::apply_control(self.c.name, theme::ControlKind::Edit);
+        self.update_status();
+        theme::repaint(self.hwnd);
     }
 
     fn dpi_changed(&mut self, dpi: u32, suggested: RECT) {
@@ -383,11 +534,15 @@ impl Settings {
         let fonts = Fonts::new(dpi);
         for h in self.c.all() {
             unsafe { SendMessageW(h, WM_SETFONT, fonts.normal as usize, 1) };
+            widgets::set_fonts(h, &fonts);
         }
         for h in [self.c.configs_label, self.c.monitors_label, self.c.hotkeys_label] {
-            unsafe { SendMessageW(h, WM_SETFONT, fonts.bold as usize, 1) };
+            unsafe { SendMessageW(h, WM_SETFONT, fonts.section as usize, 1) };
         }
-        unsafe { SendMessageW(self.c.name, WM_SETFONT, fonts.title as usize, 1) };
+        unsafe {
+            SendMessageW(self.c.name, WM_SETFONT, fonts.title as usize, 1);
+            SendMessageW(self.c.profiles, LB_SETITEMHEIGHT, 0, ui::scale(PROFILE_ITEM_HEIGHT, dpi) as LPARAM);
+        }
         self.fonts = fonts; // the old fonts are deleted once nothing uses them
         unsafe {
             SetWindowPos(self.hwnd, 0, suggested.left, suggested.top, suggested.right - suggested.left,
@@ -395,7 +550,6 @@ impl Settings {
         }
         self.layout();
     }
-
     // -------------------------------------------------------------------------------- configurations
 
     fn selected_id(&self) -> Option<String> {
@@ -414,13 +568,16 @@ impl Settings {
         self.connected.iter().find(|m| m.id.eq_ignore_ascii_case(monitor_id)).cloned()
     }
 
+    /// "Name\tConnected · 2 monitors · hotkeys off": drawn as two lines by draw_profile.
     fn profile_label(&self, i: usize) -> String {
         let p = &self.config.profiles[i];
-        let mut tags = Vec::new();
-        if self.is_active(i) { tags.push("connected"); }
-        if !p.enabled { tags.push("hotkeys off"); }
+        let mut parts = vec![
+            if self.is_active(i) { "Connected".to_string() } else { "Not connected".to_string() },
+            if p.monitors.len() == 1 { "1 monitor".to_string() } else { format!("{} monitors", p.monitors.len()) },
+        ];
+        if !p.enabled { parts.push("hotkeys off".into()); }
         let name = if p.name.trim().is_empty() { "Unnamed setup" } else { p.name.as_str() };
-        if tags.is_empty() { name.to_string() } else { format!("{name}  ({})", tags.join(", ")) }
+        format!("{name}\t{}", parts.join(" · "))
     }
 
     fn refresh_profiles(&mut self, select: Option<&str>) {
@@ -445,13 +602,14 @@ impl Settings {
         }
         let Some(i) = self.sel else {
             ui::set_text(self.c.name, "");
-            ui::set_checked(self.c.enabled, false);
+            widgets::set_checked(self.c.enabled, false);
             let text = if matcher::fingerprint(&self.connected).is_empty() {
                 "No external monitors are connected. Connect your monitors and a configuration will be created for them automatically."
             } else {
                 "No configurations yet. Choose \"New from current setup\" to create one for the monitors connected now."
             };
             ui::set_text(self.c.status, text);
+            self.set_banner(theme::palette().neutral);
             ui::lv_clear(self.c.monitors);
             ui::lv_clear(self.c.hotkeys);
             self.update_hotkey_buttons();
@@ -459,7 +617,7 @@ impl Settings {
         };
         let (name, enabled) = (self.config.profiles[i].name.clone(), self.config.profiles[i].enabled);
         ui::set_text(self.c.name, &name);
-        ui::set_checked(self.c.enabled, enabled);
+        widgets::set_checked(self.c.enabled, enabled);
         self.update_status();
         self.refresh_monitors();
         self.refresh_hotkeys();
@@ -470,16 +628,25 @@ impl Settings {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
         let present = p.monitors.iter().filter(|m| self.is_connected(&m.monitor_id)).count();
-        let text = if self.is_active(i) {
+        let colours = theme::palette();
+        let (text, banner) = if self.is_active(i) {
             if p.enabled {
-                format!("✔  Connected now ({present} of {} monitors present). Hotkeys are active.", p.monitors.len())
+                (format!("✔  Connected now ({present} of {} monitors present). Hotkeys are active.", p.monitors.len()), colours.success)
             } else {
-                format!("⚠  Connected now ({present} of {} monitors present). Turn hotkeys on to use them.", p.monitors.len())
+                (format!("⚠  Connected now ({present} of {} monitors present). Turn hotkeys on to use them.", p.monitors.len()), colours.caution)
             }
         } else {
-            "Not connected now. Inputs can only be detected and tested while this setup is connected.".to_string()
+            ("Not connected now. Inputs can only be detected and tested while this setup is connected.".to_string(), colours.neutral)
         };
         ui::set_text(self.c.status, &text);
+        self.set_banner(banner);
+    }
+
+    /// Sets the status banner's colour (green, amber or grey) and repaints it.
+    fn set_banner(&self, colour: u32) {
+        theme::set_banner(colour);
+        let r = self.regions.banner;
+        unsafe { RedrawWindow(self.hwnd, &r, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
     }
 
     fn rename_profile(&mut self) {
@@ -491,7 +658,7 @@ impl Settings {
 
     fn toggle_enabled(&mut self) {
         let Some(i) = self.sel else { return };
-        self.config.profiles[i].enabled = ui::checked(self.c.enabled);
+        self.config.profiles[i].enabled = widgets::checked(self.c.enabled);
         self.refresh_profile_label();
         self.update_status();
         self.commit();
@@ -741,7 +908,7 @@ impl Settings {
         if !p.enabled {
             // Adding a hotkey is a strong sign the configuration should be live.
             p.enabled = true;
-            ui::set_checked(self.c.enabled, true);
+            widgets::set_checked(self.c.enabled, true);
             self.refresh_profile_label();
             self.update_status();
         }
@@ -817,7 +984,7 @@ impl Settings {
             (ID_TEST_HOTKEY, BN_CLICKED) => self.test_hotkey(),
             (ID_STARTUP, BN_CLICKED) => self.set_startup(),
             (ID_NOTIFY, BN_CLICKED) => {
-                self.config.show_notifications = ui::checked(self.c.notify);
+                self.config.show_notifications = widgets::checked(self.c.notify);
                 self.commit();
             }
             (IDCANCEL, _) => return self.request_close(),
@@ -868,10 +1035,10 @@ impl Settings {
     }
 
     fn set_startup(&mut self) {
-        let on = ui::checked(self.c.startup);
+        let on = widgets::checked(self.c.startup);
         if !sys::set_startup(on) {
             ui::alert(self.hwnd, ui::Icon::Warning, "Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.");
-            ui::set_checked(self.c.startup, sys::startup_enabled());
+            widgets::set_checked(self.c.startup, sys::startup_enabled());
         }
     }
 

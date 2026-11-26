@@ -24,7 +24,7 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 
 ## What's different
 
-- **Look:** native Win32 controls with the Windows visual style, Segoe UI and per-monitor DPI scaling, instead of WPF's Fluent theme. There's no dark mode or Mica background.
+- **Look:** styled after the C# app's Fluent theme, with no UI framework. It follows the Windows light/dark setting and accent colour, live: dark title bars, a layered content area with rounded cards, a coloured status banner, a two-line configuration list, and owner-drawn rounded buttons and checkboxes with Segoe Fluent Icons. The remaining differences: no Mica backdrop, the tick boxes inside list views stay light, and confirmations (`TaskDialog`) stay light because Windows doesn't theme them. Dark list views, edit boxes, scroll bars and menus use uxtheme functions that are only exported by ordinal (undocumented, but used by Explorer and Notepad++); if they're missing, those controls stay light.
 - **Dialogs:** Windows' own `TaskDialog`. Confirmations offer Yes / No rather than buttons labelled "Delete" or "Remove".
 - **Recording a hotkey:** click the box to start recording (it turns blue while it's listening). Win-key combinations are recorded too: while the box is listening, a short-lived keyboard hook stops Windows acting on the Win key. On Save, the editor refuses combinations Windows or another app already owns, and warns about known Windows shortcuts (such as Ctrl + Win + M for Magnifier), which Windows handles before any app sees them.
 - **Renaming a monitor:** done in place in the list (select it and press **Rename**, or F2).
@@ -50,6 +50,8 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 | `reserved.rs` | Known Windows shortcuts, warned about when saving a hotkey |
 | `monitors.rs` | Enumeration (CCD + EDID), DDC/CI, capabilities parsing, switching |
 | `config.rs`, `matcher.rs`, `hotkey.rs` | Settings model and file, setup matching, hotkeys |
+| `theme.rs` | Light/dark palette, accent colour, dark title bars and controls, surface colours, drawing helpers |
+| `widgets.rs` | Owner-drawn rounded buttons and checkboxes (hover, pressed, icons) |
 | `ui.rs`, `sys.rs` | Win32 UI helpers, IDs, time, version, startup |
 
 ## Building and testing
@@ -59,7 +61,7 @@ You need Rust (stable, MSVC toolchain).
 ```
 cd rust
 cargo build --release          # target\release\InputSwitch.exe
-cargo test --release           # 21 unit tests
+cargo test --release           # 22 unit tests
 pwsh ..\tests\launch-smoke.ps1 -Exe target\release\InputSwitch.exe
 ```
 
@@ -67,4 +69,3 @@ pwsh ..\tests\launch-smoke.ps1 -Exe target\release\InputSwitch.exe
 
 - CI and release workflows for the Rust build. The existing ones still build the C# app.
 - An Arm64 build. It needs the `aarch64-pc-windows-msvc` target; the code has no x64-specific parts.
-- Dark mode.

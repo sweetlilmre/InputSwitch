@@ -332,7 +332,6 @@ pub const WS_CAPTION: u32 = 0x00C0_0000;
 pub const WS_SYSMENU: u32 = 0x0008_0000;
 pub const WS_VSCROLL: u32 = 0x0020_0000;
 pub const WS_TABSTOP: u32 = 0x0001_0000;
-pub const WS_EX_CLIENTEDGE: u32 = 0x0000_0200;
 pub const WS_EX_DLGMODALFRAME: u32 = 0x0000_0001;
 pub const WS_EX_CONTROLPARENT: u32 = 0x0001_0000;
 pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
@@ -348,11 +347,6 @@ pub const IDC_ARROW: usize = 32512;
 pub const SM_CXSMICON: i32 = 49;
 
 // Controls.
-pub const BS_PUSHBUTTON: u32 = 0x0;
-pub const BS_DEFPUSHBUTTON: u32 = 0x1;
-pub const BS_AUTOCHECKBOX: u32 = 0x3;
-pub const BM_GETCHECK: u32 = 0x00F0;
-pub const BM_SETCHECK: u32 = 0x00F1;
 pub const BN_CLICKED: u16 = 0;
 pub const ES_AUTOHSCROLL: u32 = 0x0080;
 pub const EN_CHANGE: u16 = 0x0300;
@@ -410,7 +404,6 @@ pub const LVIS_FOCUSED: u32 = 0x1;
 pub const LVIS_SELECTED: u32 = 0x2;
 pub const LVIS_STATEIMAGEMASK: u32 = 0xF000;
 pub const LVNI_SELECTED: isize = 0x2;
-pub const LVSCW_AUTOSIZE_USEHEADER: isize = -2;
 pub const NM_DBLCLK: u32 = (-3i32) as u32;
 pub const LVN_ITEMCHANGED: u32 = (-101i32) as u32;
 pub const LVN_ENDLABELEDITW: u32 = (-176i32) as u32;
@@ -431,8 +424,6 @@ pub const WM_SYSKEYUP: u32 = 0x0105;
 pub const WM_KEYLAST: u32 = 0x0109;
 pub const WM_CTLCOLORSTATIC: u32 = 0x0138;
 pub const ES_READONLY: u32 = 0x0800;
-pub const COLOR_WINDOW: i32 = 5;
-pub const COLOR_WINDOWTEXT: i32 = 8;
 pub const WH_KEYBOARD_LL: i32 = 13;
 pub const GA_ROOT: u32 = 2;
 pub const VK_BACK: u16 = 0x08;
@@ -626,8 +617,6 @@ extern "system" {
     pub fn HideCaret(h: HWND) -> BOOL;
     pub fn IsChild(parent: HWND, h: HWND) -> BOOL;
     pub fn InvalidateRect(h: HWND, r: *const RECT, erase: BOOL) -> BOOL;
-    pub fn GetSysColor(index: i32) -> u32;
-    pub fn GetSysColorBrush(index: i32) -> isize;
     pub fn SetWindowsHookExW(kind: i32, proc: HOOKPROC, inst: HINSTANCE, thread: u32) -> isize;
     pub fn UnhookWindowsHookEx(hook: isize) -> BOOL;
     pub fn CallNextHookEx(hook: isize, code: i32, w: WPARAM, l: LPARAM) -> LRESULT;
@@ -658,4 +647,126 @@ extern "system" {
 
 pub fn hinstance() -> HINSTANCE {
     unsafe { GetModuleHandleW(core::ptr::null()) }
+}
+
+// ------------------------------------------------------------------------------------------ theming and drawing
+
+pub const WM_ERASEBKGND: u32 = 0x0014;
+pub const WM_SETTINGCHANGE: u32 = 0x001A;
+pub const WM_DRAWITEM: u32 = 0x002B;
+pub const WM_MEASUREITEM: u32 = 0x002C;
+pub const WM_CTLCOLOREDIT: u32 = 0x0133;
+pub const WM_CTLCOLORLISTBOX: u32 = 0x0134;
+pub const WM_CTLCOLORBTN: u32 = 0x0135;
+pub const WM_MOUSEMOVE: u32 = 0x0200;
+pub const WM_MOUSELEAVE: u32 = 0x02A3;
+pub const WM_THEMECHANGED: u32 = 0x031A;
+pub const BS_OWNERDRAW: u32 = 0x000B;
+pub const LBS_OWNERDRAWFIXED: u32 = 0x0010;
+pub const LBS_HASSTRINGS: u32 = 0x0040;
+pub const LB_GETTEXT: u32 = 0x0189;
+pub const LB_GETTEXTLEN: u32 = 0x018A;
+pub const LB_SETITEMHEIGHT: u32 = 0x01A0;
+pub const EM_SETMARGINS: u32 = 0x00D3;
+pub const EC_LEFTMARGIN: usize = 0x1;
+pub const EC_RIGHTMARGIN: usize = 0x2;
+pub const ODT_LISTBOX: u32 = 2;
+pub const ODT_BUTTON: u32 = 4;
+pub const ODS_SELECTED: u32 = 0x0001;
+pub const ODS_DISABLED: u32 = 0x0004;
+pub const ODS_FOCUS: u32 = 0x0010;
+pub const ODS_NOFOCUSRECT: u32 = 0x0200;
+pub const DT_CENTER: u32 = 0x0001;
+pub const DT_VCENTER: u32 = 0x0004;
+pub const DT_SINGLELINE: u32 = 0x0020;
+pub const DT_NOPREFIX: u32 = 0x0800;
+pub const DT_END_ELLIPSIS: u32 = 0x8000;
+pub const TME_LEAVE: u32 = 0x0002;
+pub const TRANSPARENT: i32 = 1;
+pub const PS_SOLID: i32 = 0;
+pub const NULL_BRUSH: i32 = 5;
+pub const NULL_PEN: i32 = 8;
+pub const RDW_INVALIDATE: u32 = 0x0001;
+pub const RDW_ERASE: u32 = 0x0004;
+pub const RDW_ALLCHILDREN: u32 = 0x0080;
+pub const RDW_FRAME: u32 = 0x0400;
+pub const LVM_SETBKCOLOR: u32 = 0x1001;
+pub const LVM_GETHEADER: u32 = 0x101F;
+pub const LVM_SETTEXTCOLOR: u32 = 0x1024;
+pub const LVM_SETTEXTBKCOLOR: u32 = 0x1026;
+pub const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+
+#[repr(C)]
+pub struct DRAWITEMSTRUCT {
+    pub CtlType: u32,
+    pub CtlID: u32,
+    pub itemID: u32,
+    pub itemAction: u32,
+    pub itemState: u32,
+    pub hwndItem: HWND,
+    pub hDC: HDC,
+    pub rcItem: RECT,
+    pub itemData: usize,
+}
+
+#[repr(C)]
+pub struct MEASUREITEMSTRUCT {
+    pub CtlType: u32,
+    pub CtlID: u32,
+    pub itemID: u32,
+    pub itemWidth: u32,
+    pub itemHeight: u32,
+    pub itemData: usize,
+}
+
+#[repr(C)]
+pub struct TRACKMOUSEEVENT {
+    pub cbSize: u32,
+    pub dwFlags: u32,
+    pub hwndTrack: HWND,
+    pub dwHoverTime: u32,
+}
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn FillRect(hdc: HDC, r: *const RECT, brush: isize) -> i32;
+    pub fn DrawTextW(hdc: HDC, text: *const u16, len: i32, r: *mut RECT, format: u32) -> i32;
+    pub fn TrackMouseEvent(t: *mut TRACKMOUSEEVENT) -> BOOL;
+    pub fn RedrawWindow(h: HWND, r: *const RECT, rgn: isize, flags: u32) -> BOOL;
+}
+
+#[link(name = "gdi32")]
+extern "system" {
+    pub fn CreatePen(style: i32, width: i32, color: u32) -> isize;
+    pub fn SelectObject(hdc: HDC, obj: isize) -> isize;
+    pub fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) -> BOOL;
+    pub fn SetBkMode(hdc: HDC, mode: i32) -> i32;
+    pub fn GetStockObject(i: i32) -> isize;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn LoadLibraryW(name: *const u16) -> HINSTANCE;
+    pub fn GetProcAddress(module: HINSTANCE, name: *const u8) -> *const core::ffi::c_void;
+}
+
+#[link(name = "dwmapi")]
+extern "system" {
+    pub fn DwmSetWindowAttribute(h: HWND, attr: u32, value: *const core::ffi::c_void, size: u32) -> i32;
+}
+pub const NM_CUSTOMDRAW: u32 = (-12i32) as u32;
+pub const CDDS_PREPAINT: u32 = 0x0000_0001;
+pub const CDDS_ITEMPREPAINT: u32 = 0x0001_0001;
+pub const CDRF_NOTIFYITEMDRAW: LRESULT = 0x20;
+pub const LVM_GETCOLUMNWIDTH: u32 = 0x101D;
+
+#[repr(C)]
+pub struct NMCUSTOMDRAW {
+    pub hdr: NMHDR,
+    pub dwDrawStage: u32,
+    pub hdc: HDC,
+    pub rc: RECT,
+    pub dwItemSpec: usize,
+    pub uItemState: u32,
+    pub lItemlParam: LPARAM,
 }

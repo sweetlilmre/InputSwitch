@@ -6,7 +6,9 @@ use crate::ffi::*;
 use crate::hotkey::Hotkey;
 use crate::hotkey_box;
 use crate::monitors;
+use crate::theme::{self, Surface};
 use crate::ui::{self, Fonts};
+use crate::widgets;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
@@ -20,7 +22,7 @@ const ID_CODE: i32 = 205;
 const ID_ADD_CODE: i32 = 206;
 
 const WIDTH: i32 = 480;
-const HEIGHT: i32 = 484;
+const HEIGHT: i32 = 496;
 
 struct Controls {
     monitor: HWND,
@@ -38,6 +40,9 @@ struct Editor {
     taken: Vec<Hotkey>,
     existing: Option<Binding>,
     result: Option<Option<Binding>>,
+    dpi: u32,
+    /// Rounded frames painted behind the borderless inputs: (rect, is the hotkey box).
+    frames: Vec<(RECT, bool)>,
 }
 
 thread_local! {
@@ -68,10 +73,11 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     let hwnd = unsafe {
         CreateWindowExW(ex, wide(CLASS).as_ptr(), wide(title).as_ptr(), style, x, y, w, h, owner, 0, hinstance(), core::ptr::null())
     };
+    theme::apply_window(hwnd);
 
     LAST_FOCUS.store(0, Ordering::Relaxed);
     let fonts = Fonts::new(dpi);
-    let c = create_controls(hwnd, &fonts, dpi, existing.map(|b| b.hotkey).unwrap_or_default());
+    let (c, frames) = create_controls(hwnd, &fonts, dpi, existing.map(|b| b.hotkey).unwrap_or_default());
 
     let taken = profile.bindings.iter().filter(|b| Some(&b.id) != existing.map(|e| &e.id)).map(|b| b.hotkey).collect();
     let names: Vec<String> = profile.monitors.iter().map(|m| format!("{}  ·  {}", m.name, m.model)).collect();
@@ -81,7 +87,7 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     STATE.with(|s| {
         *s.borrow_mut() = Some(Editor {
             hwnd, _fonts: fonts, c, monitors: profile.monitors.clone(), taken, existing: existing.cloned(),
-            result: None,
+            result: None, dpi, frames,
         })
     });
     with(|e| {
@@ -99,8 +105,28 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
 unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match m {
         WM_COMMAND => {
+            if hiword(w) == BN_CLICKED && l != 0 {
+                widgets::clicked(l as HWND);
+            }
             with(|e| e.command(loword(w) as i32, hiword(w)));
             return 0;
+        }
+        WM_ERASEBKGND => {
+            if with(|e| e.paint_background(w as HDC)).is_none() {
+                let mut rc = RECT::default();
+                GetClientRect(h, &mut rc);
+                theme::fill(w as HDC, rc, theme::palette().window);
+            }
+            return 1;
+        }
+        WM_DRAWITEM => {
+            if widgets::draw(&*(l as *const DRAWITEMSTRUCT)) {
+                return 1;
+            }
+        }
+        WM_SETTINGCHANGE if theme::is_theme_change(m, l) => {
+            theme::reload();
+            with(|e| e.retheme());
         }
         WM_NOTIFY => {
             let hdr = &*(l as *const NMHDR);
@@ -115,8 +141,8 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             with(|e| e.result = Some(None));
             return 0;
         }
-        WM_CTLCOLORSTATIC => {
-            if let Some(brush) = hotkey_box::ctl_color(w as HDC, l as HWND) {
+        WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORBTN => {
+            if let Some(brush) = hotkey_box::ctl_color(w as HDC, l as HWND).or_else(|| theme::ctl_color(m, w as HDC, l as HWND)) {
                 return brush;
             }
         }
@@ -156,45 +182,81 @@ fn restore_focus() {
     }
 }
 
-fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> Controls {
+fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, Vec<(RECT, bool)>) {
     let n = f.normal;
-    let p = |hw: HWND, x: i32, y: i32, w: i32, ht: i32| ui::place(hw, ui::scale(x, dpi), ui::scale(y, dpi), ui::scale(w, dpi), ui::scale(ht, dpi));
+    let sc = |v: i32| ui::scale(v, dpi);
+    let p = |hw: HWND, x: i32, y: i32, w: i32, ht: i32| ui::place(hw, sc(x), sc(y), sc(w), sc(ht));
+    let r = |x: i32, y: i32, w: i32, ht: i32| RECT { left: sc(x), top: sc(y), right: sc(x + w), bottom: sc(y + ht) };
     let (m, w) = (16, WIDTH - 32);
+    let mut frames = Vec::new();
 
-    p(ui::label(h, "Monitor", f.bold), m, 14, w, 20);
+    p(ui::label_on(h, "Monitor", f.bold, Surface::Window, false), m, 14, w, 20);
     let monitor = ui::child(h, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_MONITOR, n);
+    theme::apply_control(monitor, theme::ControlKind::ComboBox);
     p(monitor, m, 36, w, 240);
 
-    p(ui::label(h, "Key combination", f.bold), m, 72, w, 20);
+    p(ui::label_on(h, "Key combination", f.bold, Surface::Window, false), m, 74, w, 20);
     // The hint under the box says whether it's listening; it wraps onto a second line.
     let hint = ui::child(h, "STATIC", "", SS_NOPREFIX, 0, 0, n);
-    p(hint, m, 124, w, 34);
+    theme::set_surface(hint, Surface::Window, true);
+    p(hint, m, 134, w, 34);
     let hotkey = hotkey_box::create(h, ID_HOTKEY, n, initial, hint);
-    p(hotkey, m, 94, w, 26);
+    frames.push((r(m, 96, w, 32), true));
+    p(hotkey, m + 2, 103, w - 4, 20);
 
-    p(ui::label(h, "Inputs", f.bold), m, 170, w, 20);
-    p(ui::label(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", n), m, 192, w, 20);
+    p(ui::label_on(h, "Inputs", f.bold, Surface::Window, false), m, 174, w, 20);
+    p(ui::label_on(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", n, Surface::Window, true), m, 196, w, 20);
     let inputs = ui::listview(h, ID_INPUTS, LVS_NOCOLUMNHEADER, LVS_EX_CHECKBOXES, n);
-    p(inputs, m, 216, w - 92, 150);
-    ui::lv_add_column(inputs, 0, "Input", ui::scale(w - 92 - 24, dpi));
-    p(ui::button(h, "Move up", ID_UP, n), m + w - 84, 216, 84, 28);
-    p(ui::button(h, "Move down", ID_DOWN, n), m + w - 84, 250, 84, 28);
+    frames.push((r(m, 220, w - 100, 150), false));
+    p(inputs, m + 1, 221, w - 102, 148);
+    ui::lv_add_column(inputs, 0, "Input", sc(w - 102 - 24));
+    p(widgets::button(h, "Up", ID_UP, Some(widgets::ICON_UP), f, Surface::Window), m + w - 92, 220, 92, 32);
+    p(widgets::button(h, "Down", ID_DOWN, Some(widgets::ICON_DOWN), f, Surface::Window), m + w - 92, 258, 92, 32);
 
-    p(ui::label(h, "Other input code (hex):", n), m, 382, 150, 20);
-    let code = ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_CODE, n);
-    p(code, m + 156, 378, 70, 26);
-    p(ui::button(h, "Add", ID_ADD_CODE, n), m + 234, 377, 70, 28);
+    p(ui::label_on(h, "Other input code (hex):", n, Surface::Window, false), m, 389, 150, 20);
+    let code = ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, 0, ID_CODE, n);
+    theme::apply_control(code, theme::ControlKind::Edit);
+    frames.push((r(m + 156, 382, 80, 32), false));
+    p(code, m + 162, 389, 68, 20);
+    p(widgets::button(h, "Add", ID_ADD_CODE, Some(widgets::ICON_ADD), f, Surface::Window), m + 244, 382, 84, 32);
 
-    let summary = ui::label(h, "", f.bold);
-    p(summary, m, 414, w, 20);
+    let summary = ui::label_on(h, "", f.bold, Surface::Window, false);
+    p(summary, m, 424, w, 20);
 
-    p(ui::child(h, "BUTTON", "Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, IDOK, n), WIDTH - 16 - 90 - 8 - 90, 442, 90, 28);
-    p(ui::button(h, "Cancel", IDCANCEL, n), WIDTH - 16 - 90, 442, 90, 28);
+    p(widgets::accent_button(h, "Save", IDOK, None, f, Surface::Window), WIDTH - 16 - 100 - 8 - 100, 450, 100, 32);
+    p(widgets::button(h, "Cancel", IDCANCEL, None, f, Surface::Window), WIDTH - 16 - 100, 450, 100, 32);
 
-    Controls { monitor, inputs, code, summary }
+    (Controls { monitor, inputs, code, summary }, frames)
 }
-
 impl Editor {
+    /// Paints the background and the rounded frames behind the key box, input list and code box.
+    fn paint_background(&self, hdc: HDC) {
+        let p = theme::palette();
+        let mut rc = RECT::default();
+        unsafe { GetClientRect(self.hwnd, &mut rc) };
+        theme::fill(hdc, rc, p.window);
+        for &(frame, is_hotkey) in &self.frames {
+            let fill = if is_hotkey { hotkey_box::background() } else { p.control };
+            let border = if is_hotkey && hotkey_box::is_listening() { p.accent } else { p.control_stroke };
+            theme::round_rect(hdc, frame, ui::scale(4, self.dpi), fill, Some(border));
+        }
+    }
+
+    fn retheme(&mut self) {
+        theme::apply_window(self.hwnd);
+        theme::apply_control(self.c.monitor, theme::ControlKind::ComboBox);
+        theme::apply_control(self.c.code, theme::ControlKind::Edit);
+        theme::apply_control(self.c.inputs, theme::ControlKind::ListView);
+        // Checkbox images are made when the style is set: clear and set it again to redraw them.
+        unsafe {
+            SendMessageW(self.c.inputs, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES as usize, 0);
+            SendMessageW(self.c.inputs, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES as usize, LVS_EX_CHECKBOXES as LPARAM);
+        }
+        let checked = self.checked_inputs();
+        self.fill_inputs_keeping(&checked);
+        theme::repaint(self.hwnd);
+    }
+
     fn selected_monitor(&self) -> Option<&ProfileMonitor> {
         ui::cb_selected(self.c.monitor).and_then(|i| self.monitors.get(i))
     }
@@ -215,6 +277,14 @@ impl Editor {
             ui::lv_set_checked(self.c.inputs, row, selected.contains(&code));
         }
         self.update_summary();
+    }
+
+    /// Re-applies tick marks (after the checkbox images were rebuilt), keeping the order.
+    fn fill_inputs_keeping(&self, checked: &[u8]) {
+        for r in 0..ui::lv_count(self.c.inputs) {
+            let code = ui::lv_param(self.c.inputs, r) as u8;
+            ui::lv_set_checked(self.c.inputs, r, checked.contains(&code));
+        }
     }
 
     fn checked_inputs(&self) -> Vec<u8> {

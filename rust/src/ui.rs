@@ -10,21 +10,49 @@ pub fn scale(v: i32, dpi: u32) -> i32 {
 }
 
 pub fn make_font(dpi: u32, points: i32, weight: i32) -> HFONT {
+    font_face("Segoe UI", dpi, points, weight)
+}
+
+fn font_face(face: &str, dpi: u32, points: i32, weight: i32) -> HFONT {
     unsafe {
         // DEFAULT_CHARSET = 1, CLEARTYPE_QUALITY = 5
-        CreateFontW(-(points * dpi as i32 / 72), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, wide("Segoe UI").as_ptr())
+        CreateFontW(-(points * dpi as i32 / 72), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, wide(face).as_ptr())
     }
+}
+
+/// Segoe Fluent Icons on Windows 11; Segoe MDL2 Assets (mostly the same glyphs) on Windows 10.
+fn icon_face() -> &'static str {
+    let installed = unsafe {
+        let mut key: HKEY = 0;
+        let path = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts");
+        let found = RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), 0, KEY_READ, &mut key) == 0
+            && RegQueryValueExW(key, wide("Segoe Fluent Icons (TrueType)").as_ptr(), core::ptr::null_mut(),
+                core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut()) == 0;
+        if key != 0 { RegCloseKey(key); }
+        found
+    };
+    if installed { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" }
 }
 
 pub struct Fonts {
     pub normal: HFONT,
     pub bold: HFONT,
     pub title: HFONT,
+    /// Section headings ("Configurations", "Monitors", "Hotkeys").
+    pub section: HFONT,
+    /// Fluent icon glyphs for buttons.
+    pub icon: HFONT,
 }
 
 impl Fonts {
     pub fn new(dpi: u32) -> Fonts {
-        Fonts { normal: make_font(dpi, 9, 400), bold: make_font(dpi, 9, 600), title: make_font(dpi, 14, 600) }
+        Fonts {
+            normal: make_font(dpi, 9, 400),
+            bold: make_font(dpi, 9, 600),
+            title: make_font(dpi, 16, 600),
+            section: make_font(dpi, 12, 600),
+            icon: font_face(icon_face(), dpi, 9, 400),
+        }
     }
 }
 
@@ -34,6 +62,8 @@ impl Drop for Fonts {
             DeleteObject(self.normal);
             DeleteObject(self.bold);
             DeleteObject(self.title);
+            DeleteObject(self.section);
+            DeleteObject(self.icon);
         }
     }
 }
@@ -70,12 +100,11 @@ pub fn label(parent: HWND, text: &str, font: HFONT) -> HWND {
     child(parent, "STATIC", text, SS_NOPREFIX | SS_ENDELLIPSIS, 0, 0, font)
 }
 
-pub fn button(parent: HWND, text: &str, id: i32, font: HFONT) -> HWND {
-    child(parent, "BUTTON", text, BS_PUSHBUTTON | WS_TABSTOP, 0, id, font)
-}
-
-pub fn checkbox(parent: HWND, text: &str, id: i32, font: HFONT) -> HWND {
-    child(parent, "BUTTON", text, BS_AUTOCHECKBOX | WS_TABSTOP, 0, id, font)
+/// A label on a given surface, in primary or secondary (greyer) text.
+pub fn label_on(parent: HWND, text: &str, font: HFONT, surface: crate::theme::Surface, secondary: bool) -> HWND {
+    let h = label(parent, text, font);
+    crate::theme::set_surface(h, surface, secondary);
+    h
 }
 
 pub fn place(h: HWND, x: i32, y: i32, w: i32, height: i32) {
@@ -93,14 +122,6 @@ pub fn get_text(h: HWND) -> String {
         GetWindowTextW(h, buf.as_mut_ptr(), buf.len() as i32);
         from_wide(&buf)
     }
-}
-
-pub fn checked(h: HWND) -> bool {
-    unsafe { SendMessageW(h, BM_GETCHECK, 0, 0) == 1 }
-}
-
-pub fn set_checked(h: HWND, on: bool) {
-    unsafe { SendMessageW(h, BM_SETCHECK, on as usize, 0) };
 }
 
 pub fn enable(h: HWND, on: bool) {
@@ -150,12 +171,14 @@ pub fn cb_selected(h: HWND) -> Option<usize> {
 // ------------------------------------------------------------------------------------------ list view
 
 pub fn listview(parent: HWND, id: i32, style: u32, ex_style: u32, font: HFONT) -> HWND {
+    // No border: list views sit on a card or inside a drawn frame.
     let h = child(parent, "SysListView32", "", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | WS_TABSTOP | style,
-        WS_EX_CLIENTEDGE, id, font);
+        0, id, font);
+    // Theme first: checkbox images are made from the theme when LVS_EX_CHECKBOXES is set.
+    crate::theme::apply_control(h, crate::theme::ControlKind::ListView);
     unsafe {
         let ex = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | ex_style;
         SendMessageW(h, LVM_SETEXTENDEDLISTVIEWSTYLE, ex as usize, ex as LPARAM);
-        SetWindowTheme(h, wide("Explorer").as_ptr(), null());
     }
     h
 }

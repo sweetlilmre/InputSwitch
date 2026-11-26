@@ -16,14 +16,11 @@ const PLACEHOLDER_LISTENING: &str = "Press the keys now…";
 const PLACEHOLDER_IDLE: &str = "Click here to record a key combination";
 const HINT_LISTENING: &str = "Listening — press the keys now. Win shortcuts are captured while this box is selected. Backspace clears it.";
 const HINT_IDLE: &str = "Click the box to record a key combination.";
-/// Light accent tint behind the box while it's listening (COLORREF is 0x00BBGGRR).
-const LISTENING_BACKGROUND: u32 = 0x00FB_F1E5; // RGB(229, 241, 251)
 
 static BOX: AtomicIsize = AtomicIsize::new(0);
 static HINT: AtomicIsize = AtomicIsize::new(0);
 /// The box has keyboard focus, so it's recording (and the hook is on).
 static LISTENING: AtomicBool = AtomicBool::new(false);
-static LISTENING_BRUSH: AtomicIsize = AtomicIsize::new(0);
 static HOOK: AtomicIsize = AtomicIsize::new(0);
 /// Win is down (as seen by the hook, which hides it from the rest of the system).
 static WIN_DOWN: AtomicBool = AtomicBool::new(false);
@@ -78,7 +75,8 @@ fn current_mods() -> u8 {
 /// Creates the box as a child of `parent` with the given control id and font. `hint` is a label
 /// that's kept up to date with whether the box is listening.
 pub fn create(parent: HWND, id: i32, font: HFONT, initial: Hotkey, hint: HWND) -> HWND {
-    let h = crate::ui::child(parent, "EDIT", "", ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, id, font);
+    // No border: the editor paints a rounded frame around it (accent-coloured while listening).
+    let h = crate::ui::child(parent, "EDIT", "", ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, 0, id, font);
     CAPTURED.with(|c| c.set(initial));
     BOX.store(h, Ordering::Relaxed);
     HINT.store(hint, Ordering::Relaxed);
@@ -99,30 +97,29 @@ pub fn is_raw_key(msg: &MSG) -> bool {
     b != 0 && msg.hwnd == b && !(msg.message == WM_KEYDOWN && is_dialog_key(msg.wParam as u16, current_mods()))
 }
 
-/// Paints the box: tinted while listening, otherwise normal window colours (rather than the grey
-/// of a read-only edit). Call from the parent's WM_CTLCOLORSTATIC; returns the brush if it was
-/// for the box.
+/// The box's background: tinted while listening, otherwise the normal input colour.
+pub fn background() -> u32 {
+    let p = crate::theme::palette();
+    if LISTENING.load(Ordering::Relaxed) { p.listening } else { p.control }
+}
+
+pub fn is_listening() -> bool {
+    LISTENING.load(Ordering::Relaxed)
+}
+
+/// Paints the box with the theme's colours rather than the grey of a read-only edit.
+/// Call from the parent's WM_CTLCOLORSTATIC; returns the brush if it was for the box.
 pub fn ctl_color(hdc: HDC, control: HWND) -> Option<LRESULT> {
     if control != BOX.load(Ordering::Relaxed) {
         return None;
     }
+    let bg = background();
     unsafe {
-        SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
-        if LISTENING.load(Ordering::Relaxed) {
-            let mut brush = LISTENING_BRUSH.load(Ordering::Relaxed);
-            if brush == 0 {
-                brush = CreateSolidBrush(LISTENING_BACKGROUND); // kept for the life of the app
-                LISTENING_BRUSH.store(brush, Ordering::Relaxed);
-            }
-            SetBkColor(hdc, LISTENING_BACKGROUND);
-            Some(brush)
-        } else {
-            SetBkColor(hdc, GetSysColor(COLOR_WINDOW));
-            Some(GetSysColorBrush(COLOR_WINDOW))
-        }
+        SetTextColor(hdc, crate::theme::palette().text);
+        SetBkColor(hdc, bg);
     }
+    Some(crate::theme::brush(bg))
 }
-
 /// Updates the tint, the hint and the placeholder for whether the box is listening.
 fn set_listening(h: HWND, on: bool) {
     LISTENING.store(on, Ordering::Relaxed);
@@ -131,7 +128,11 @@ fn set_listening(h: HWND, on: bool) {
         crate::ui::set_text(hint, if on { HINT_LISTENING } else { HINT_IDLE });
     }
     show(h, None);
-    unsafe { InvalidateRect(h, core::ptr::null(), 1) };
+    unsafe {
+        InvalidateRect(h, core::ptr::null(), 1);
+        // The frame around the box (drawn by the editor) changes colour too.
+        RedrawWindow(GetAncestor(h, 1 /* GA_PARENT */), core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE);
+    }
 }
 
 fn show(h: HWND, partial: Option<u8>) {
