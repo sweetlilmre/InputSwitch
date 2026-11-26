@@ -149,7 +149,9 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         // Track: a pill, accent-filled when on. Knob: a circle at the left (off) or right (on).
         let (tw, th) = (s(40), s(20));
         let top = r.top + (r.bottom - r.top - th) / 2;
-        let track = RECT { left: r.left + s(1), top, right: r.left + s(1) + tw, bottom: top + th };
+        // Inset so the focus ring (2 px outside the track) stays inside the control.
+        let inset = s(3);
+        let track = RECT { left: r.left + inset, top, right: r.left + inset + tw, bottom: top + th };
         let (track_fill, track_border, knob) = if checked {
             (if disabled { p.text_disabled } else if hot { p.accent_hot } else { p.accent }, None, p.on_accent)
         } else {
@@ -163,7 +165,14 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         let label = RECT { left: track.right + s(10), top: r.top, right: r.right, bottom: r.bottom };
         theme::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         if focused {
-            theme::round_rect(hdc, RECT { left: track.left - s(2), top: track.top - s(2), right: track.right + s(2), bottom: track.bottom + s(2) }, th / 2 + s(2), theme::NO_FILL, Some(p.text));
+            // Kept inside the control: anything outside is clipped (DPI rounding can push it out by a pixel).
+            let ring = RECT {
+                left: (track.left - s(2)).max(r.left),
+                top: (track.top - s(2)).max(r.top),
+                right: (track.right + s(2)).min(r.right - 1),
+                bottom: (track.bottom + s(2)).min(r.bottom - 1),
+            };
+            theme::round_rect(hdc, ring, (ring.bottom - ring.top) / 2, theme::NO_FILL, Some(p.text));
         }
         return true;
     }
