@@ -271,26 +271,28 @@ impl Editor {
         let hk = hotkey_box::value();
         let inputs = self.checked_inputs();
         let monitor = self.selected_monitor().map(|m| m.monitor_id.clone());
-        let problem = if monitor.is_none() {
-            Some("Choose a monitor.".to_string())
+        // Each problem gets a heading that describes it, rather than one heading for all of them.
+        let problem: Option<(String, &str)> = if monitor.is_none() {
+            Some(("Choose a monitor".into(), "Pick the monitor this hotkey should switch."))
         } else if hk.is_empty() {
-            Some("Click the key combination box and press the keys to use.".into())
+            Some(("No key combination yet".into(), "Click the key combination box and press the keys to use."))
         } else if !hk.is_valid() {
-            Some("Use Ctrl, Alt or Win with the key (or one of F13–F24).".into())
+            Some(("That combination can't be used".into(), "Use Ctrl, Alt or Win with the key (or one of F13–F24)."))
         } else if inputs.is_empty() {
-            Some("Tick at least one input.".into())
+            Some(("This hotkey isn't finished".into(), "Tick at least one input."))
         } else if self.taken.contains(&hk) {
-            Some(format!("{} is already used in this configuration.", hk.display()))
+            Some((format!("{} is already in use", hk.display()),
+                "Another hotkey in this configuration uses it. Choose a different combination, or change the other hotkey."))
         } else {
             None
         };
-        if let Some(p) = problem {
-            ui::alert(self.hwnd, ui::Icon::Warning, "This hotkey isn't finished", &p);
+        if let Some((heading, message)) = problem {
+            ui::alert(self.hwnd, ui::Icon::Warning, &heading, message);
             return;
         }
 
         // Windows refuses combinations already owned by Windows or another app. (The tray app's
-        // own hotkeys are released while the settings window is open, so they don't count.)
+        // own hotkeys are paused while the hotkey editor is open, so they don't count.)
         if self.existing.as_ref().map(|b| b.hotkey) != Some(hk) && !can_register(self.hwnd, hk) {
             ui::alert(self.hwnd, ui::Icon::Warning, &format!("{} is already in use", hk.display()),
                 "Windows or another app already uses this combination, so InputSwitch can't. Choose another one.");

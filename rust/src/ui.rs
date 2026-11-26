@@ -264,11 +264,6 @@ pub fn confirm(owner: HWND, main: &str, content: &str) -> bool {
     td(owner, TD_WARNING_ICON, main, content, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON) == IDYES
 }
 
-/// Yes / No / Cancel. Returns IDYES, IDNO or IDCANCEL.
-pub fn ask_yes_no_cancel(owner: HWND, main: &str, content: &str) -> i32 {
-    td(owner, null(), main, content, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON | TDCBF_CANCEL_BUTTON)
-}
-
 /// Runs a modal message loop for `dialog` (owner disabled) until `done()` is true.
 /// Keyboard messages for which `raw_key(msg)` is true skip dialog navigation and character
 /// translation and go straight to their window (used by the hotkey capture box).

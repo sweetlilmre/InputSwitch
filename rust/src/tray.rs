@@ -22,7 +22,11 @@ const SETTLE_MS: u32 = 2500;
 /// Results from background work and other windows, delivered on the tray's thread.
 pub enum Event {
     SwitchFailed(String),
-    SettingsClosed(Option<AppConfig>),
+    /// The main window changed something: save it and apply it straight away.
+    ConfigChanged(AppConfig),
+    /// The hotkey editor opened (true) or closed (false): pause or resume the hotkeys.
+    Capturing(bool),
+    SettingsClosed,
 }
 
 static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
@@ -51,6 +55,10 @@ struct Tray {
     connected: Vec<MonitorInfo>,
     active: Option<String>,
     settings_open: bool,
+    /// The hotkey editor is open: hotkeys are paused meanwhile.
+    capturing: bool,
+    /// Registration failures last reported, so the same ones aren't reported on every change.
+    last_failures: String,
     /// Profile to open when the current balloon is clicked (outer None: no action).
     balloon: Option<Option<String>>,
     /// Registered hotkey id → binding index in the active profile.
@@ -84,7 +92,7 @@ pub fn run(open_settings: bool) -> i32 {
 
     TRAY.with(|t| {
         *t.borrow_mut() = Some(Tray {
-            hwnd, icon, config, connected: Vec::new(), active: None, settings_open: false, balloon: None, hotkeys: Vec::new(),
+            hwnd, icon, config, connected: Vec::new(), active: None, settings_open: false, capturing: false, last_failures: String::new(), balloon: None, hotkeys: Vec::new(),
         })
     });
     unsafe { WTSRegisterSessionNotification(hwnd, 0) };
@@ -210,14 +218,15 @@ impl Tray {
     // -------------------------------------------------------------------------------- setup detection
 
     /// Re-reads the connected monitors and activates the matching configuration, creating one
-    /// for a new setup.
+    /// for a new setup. While the main window is open, new configurations and setup notifications
+    /// wait until it closes, so its list doesn't change under the user.
     fn evaluate(&mut self, interactive: bool) {
         self.connected = monitors::enumerate();
         let fp = matcher::fingerprint(&self.connected);
         let mut index = matcher::find(&self.config, &fp, self.active.as_deref());
 
         let mut created = None;
-        if index.is_none() && !fp.is_empty() {
+        if index.is_none() && !fp.is_empty() && !self.settings_open {
             let p = matcher::create_for(&self.connected, &self.config);
             created = Some((p.id.clone(), p.name.clone(), describe(&p)));
             self.config.profiles.push(p);
@@ -231,9 +240,8 @@ impl Tray {
 
         if self.settings_open {
             settings::update_connection(self.connected.clone(), self.active.clone());
-        } else {
-            self.register_hotkeys(changed);
         }
+        self.register_hotkeys(changed);
         self.update_tip();
 
         if let Some((id, name, what)) = created {
@@ -243,7 +251,7 @@ impl Tray {
                 self.notify("New display setup detected",
                     &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, Some(Some(id)));
             }
-        } else if changed {
+        } else if changed && !self.settings_open {
             if let Some(p) = self.active_profile() {
                 let text = if p.enabled { format!("{} hotkey(s) active.", p.bindings.len()) } else { "This configuration is disabled. Click to configure.".into() };
                 let (title, id) = (format!("Display setup: {}", p.name), p.id.clone());
@@ -268,14 +276,30 @@ impl Tray {
     fn on_event(&mut self, ev: Event) {
         match ev {
             Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, None),
-            Event::SettingsClosed(saved) => {
-                self.settings_open = false;
-                if let Some(cfg) = saved {
-                    self.config = cfg;
-                    self.save();
+            Event::ConfigChanged(cfg) => {
+                self.config = cfg;
+                self.save();
+                // Configurations may have been added, deleted or changed: keep the same one active
+                // if it still fits.
+                let index = matcher::find(&self.config, &matcher::fingerprint(&self.connected), self.active.as_deref());
+                let new_active = index.map(|i| self.config.profiles[i].id.clone());
+                if new_active != self.active {
+                    self.active = new_active;
+                    if self.settings_open {
+                        settings::update_connection(self.connected.clone(), self.active.clone());
+                    }
                 }
-                self.active = None; // configurations may have changed; re-match from scratch
-                self.evaluate(false);
+                self.register_hotkeys(true);
+                self.update_tip();
+            }
+            Event::Capturing(on) => {
+                self.capturing = on;
+                self.register_hotkeys(!on);
+            }
+            Event::SettingsClosed => {
+                self.settings_open = false;
+                self.capturing = false;
+                self.evaluate(false); // creates a configuration if the setup is now unknown
             }
         }
     }
@@ -290,6 +314,9 @@ impl Tray {
 
     fn register_hotkeys(&mut self, report: bool) {
         self.unregister_hotkeys();
+        if self.capturing {
+            return;
+        }
         let Some(p) = self.active_profile() else { return };
         if !p.enabled {
             return;
@@ -309,7 +336,10 @@ impl Tray {
         }
         let target = p.id.clone();
         self.hotkeys = registered;
-        if report && !failed.is_empty() {
+        let failures = failed.join(", ");
+        let news = failures != self.last_failures;
+        self.last_failures = failures;
+        if report && !failed.is_empty() && news {
             self.notify("Some hotkeys could not be registered",
                 &format!("{} — probably in use by another application.", failed.join(", ")), NIIF_WARNING, Some(Some(target)));
         }
@@ -344,8 +374,6 @@ impl Tray {
             settings::select_and_focus(select);
             return;
         }
-        // Release the hotkeys while editing so they can be recorded in the hotkey editor.
-        self.unregister_hotkeys();
         self.settings_open = true;
         settings::open(self.config.clone(), self.connected.clone(), self.active.clone(), select.or(self.active.clone()));
     }

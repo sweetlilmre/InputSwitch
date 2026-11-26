@@ -1,5 +1,7 @@
-//! The settings window: configurations on the left; the selected one's monitors and hotkeys on the
-//! right. Works on a copy of the settings; the tray app gets it back if the user saves.
+//! The main window: configurations on the left; the selected one's monitors and hotkeys on the
+//! right. Every change is saved and applied straight away: the window posts a copy of the
+//! configuration to the tray app, which saves it and re-registers the hotkeys. Typed names are
+//! committed shortly after typing stops, and on close.
 //!
 //! State is borrowed from a thread-local RefCell for each message. Messages that arrive while it
 //! is already borrowed (from our own programmatic control changes, or while a dialog is open) skip
@@ -17,6 +19,9 @@ use std::sync::Mutex;
 
 const CLASS: &str = "InputSwitch.Settings";
 const WM_POKE: u32 = WM_APP + 2;
+/// Commits typed names once typing pauses, rather than on every keystroke.
+const TIMER_TYPING: usize = 1;
+const TYPING_MS: u32 = 700;
 
 const ID_PROFILES: i32 = 100;
 const ID_NEW: i32 = 101;
@@ -88,8 +93,8 @@ struct Controls {
     activity: HWND,
     startup: HWND,
     notify: HWND,
-    save: HWND,
-    cancel: HWND,
+    saved_note: HWND,
+    close: HWND,
 }
 
 struct Settings {
@@ -104,8 +109,8 @@ struct Settings {
     current: HashMap<String, Option<u8>>,
     attempted: HashSet<String>,
     detecting: bool,
-    dirty: bool,
-    saved: bool,
+    /// A typed name is waiting to be committed (the typing timer is running).
+    typing: bool,
 }
 
 thread_local! {
@@ -143,7 +148,7 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     STATE.with(|s| {
         *s.borrow_mut() = Some(Settings {
             hwnd, dpi, fonts, c, config, connected, active, sel: None,
-            current: HashMap::new(), attempted: HashSet::new(), detecting: false, dirty: false, saved: false,
+            current: HashMap::new(), attempted: HashSet::new(), detecting: false, typing: false,
         })
     });
     with(|s| {
@@ -232,11 +237,15 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             with(|s| s.drain());
             return 0;
         }
+        WM_TIMER if w == TIMER_TYPING => {
+            with(|s| s.commit());
+            return 0;
+        }
         WM_DESTROY => {
             HWND_SETTINGS.store(0, Ordering::Relaxed);
-            let state = STATE.with(|s| s.try_borrow_mut().ok().and_then(|mut g| g.take()));
-            let saved = state.and_then(|s| s.saved.then_some(s.config));
-            tray::post(tray::Event::SettingsClosed(saved));
+            // Everything was committed as it changed; the tray just needs to know the window has gone.
+            STATE.with(|s| s.try_borrow_mut().ok().and_then(|mut g| g.take()));
+            tray::post(tray::Event::SettingsClosed);
             return 0;
         }
         _ => {}
@@ -272,8 +281,8 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         activity: ui::label(h, "", n),
         startup: ui::checkbox(h, "Start with Windows", ID_STARTUP, n),
         notify: ui::checkbox(h, "Notify when the setup changes", ID_NOTIFY, n),
-        save: ui::child(h, "BUTTON", "Save", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, IDOK, n),
-        cancel: ui::button(h, "Cancel", IDCANCEL, n),
+        saved_note: ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, n),
+        close: ui::button(h, "Close", IDCANCEL, n),
     };
     let s = |v| ui::scale(v, dpi);
     for (i, (title, width)) in [("Name", 170), ("Model", 80), ("Serial", 100), ("Status", 95), ("Current input", 105), ("Available inputs", 250)].iter().enumerate() {
@@ -290,7 +299,7 @@ impl Controls {
         vec![self.configs_label, self.profiles, self.new, self.delete, self.version, self.name_label, self.name, self.enabled,
             self.status, self.monitors_label, self.monitors, self.rename, self.detect, self.add_connected, self.remove_monitor,
             self.hotkeys_label, self.hotkeys, self.add_hotkey, self.edit_hotkey, self.remove_hotkey, self.test_hotkey,
-            self.activity, self.startup, self.notify, self.save, self.cancel]
+            self.activity, self.startup, self.notify, self.saved_note, self.close]
     }
 
     /// The controls that only make sense with a configuration selected.
@@ -336,11 +345,11 @@ impl Settings {
         p(c.status, rx, 78, rw, 20);
 
         let bottom = h - 12 - 28;
-        p(c.save, w - 12 - 90 - 8 - 90, bottom, 90, 28);
-        p(c.cancel, w - 12 - 90, bottom, 90, 28);
+        p(c.close, w - 12 - 90, bottom, 90, 28);
         p(c.startup, rx, bottom + 4, 150, 22);
         p(c.notify, rx + 158, bottom + 4, 230, 22);
-        p(c.activity, rx, bottom - 28, rw, 20);
+        p(c.activity, rx, bottom - 28, rw - 224, 20);
+        p(c.saved_note, w - 12 - 210, bottom - 28, 210, 20);
 
         let top = 108;
         let end = bottom - 36;
@@ -476,16 +485,16 @@ impl Settings {
     fn rename_profile(&mut self) {
         let Some(i) = self.sel else { return };
         self.config.profiles[i].name = ui::get_text(self.c.name);
-        self.dirty = true;
         self.refresh_profile_label();
+        self.commit_soon();
     }
 
     fn toggle_enabled(&mut self) {
         let Some(i) = self.sel else { return };
         self.config.profiles[i].enabled = ui::checked(self.c.enabled);
-        self.dirty = true;
         self.refresh_profile_label();
         self.update_status();
+        self.commit();
     }
 
     fn new_from_current(&mut self) {
@@ -506,7 +515,7 @@ impl Settings {
         let p = matcher::create_for(&self.connected, &self.config);
         let id = p.id.clone();
         self.config.profiles.push(p);
-        self.dirty = true;
+        self.commit();
         self.refresh_profiles(Some(&id));
         unsafe {
             SetFocus(self.c.name);
@@ -518,12 +527,12 @@ impl Settings {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
         let hotkeys = if p.bindings.len() == 1 { "its hotkey".to_string() } else { format!("its {} hotkeys", p.bindings.len()) };
-        let note = if self.is_active(i) { " This setup is connected now, so a fresh, empty configuration will be created for it when you save." } else { "" };
+        let note = if self.is_active(i) { " This setup is connected now, so a fresh, empty configuration will be created for it when you close this window." } else { "" };
         if !ui::confirm(self.hwnd, &format!("Delete \"{}\"?", p.name), &format!("The configuration and {hotkeys} will be removed.{note}")) {
             return;
         }
         self.config.profiles.remove(i);
-        self.dirty = true;
+        self.commit();
         self.refresh_profiles(None);
     }
 
@@ -573,7 +582,7 @@ impl Settings {
             return false;
         }
         self.config.profiles[i].monitors[index].name = text;
-        self.dirty = true;
+        self.commit();
         self.refresh_hotkeys();
         true
     }
@@ -591,7 +600,7 @@ impl Settings {
                 monitor_id: m.id.clone(), name: m.display_name().to_string(), model: m.model.clone(), serial: m.serial.clone(), supported_inputs: Vec::new(),
             });
         }
-        self.dirty = true;
+        self.commit();
         self.refresh_profile_label();
         self.update_status();
         self.refresh_monitors();
@@ -610,7 +619,7 @@ impl Settings {
         }
         let id = self.config.profiles[i].monitors.remove(index).monitor_id;
         self.config.profiles[i].bindings.retain(|b| !b.monitor_id.eq_ignore_ascii_case(&id));
-        self.dirty = true;
+        self.commit();
         self.refresh_profile_label();
         self.update_status();
         self.refresh_monitors();
@@ -650,6 +659,7 @@ impl Settings {
 
     fn drain(&mut self) {
         let events: Vec<Bg> = std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut changed = false;
         for ev in events {
             match ev {
                 Bg::Detected { id, inputs, current } => {
@@ -658,7 +668,7 @@ impl Settings {
                             for m in &mut p.monitors {
                                 if m.monitor_id.eq_ignore_ascii_case(&id) && m.supported_inputs != inputs {
                                     m.supported_inputs = inputs.clone();
-                                    self.dirty = true;
+                                    changed = true;
                                 }
                             }
                         }
@@ -688,6 +698,9 @@ impl Settings {
                     self.refresh_monitors();
                 }
             }
+        }
+        if changed {
+            self.commit();
         }
     }
 
@@ -722,7 +735,7 @@ impl Settings {
             ui::alert(self.hwnd, ui::Icon::Info, "No monitors in this configuration", "Connect a monitor and use Add connected before adding a hotkey.");
             return;
         }
-        let Some(b) = editor::run(self.hwnd, self.dpi, &self.config.profiles[i], None) else { return };
+        let Some(b) = self.run_editor(i, None) else { return };
         let p = &mut self.config.profiles[i];
         p.bindings.push(b);
         if !p.enabled {
@@ -732,24 +745,40 @@ impl Settings {
             self.refresh_profile_label();
             self.update_status();
         }
-        self.dirty = true;
+        self.commit();
         self.refresh_hotkeys();
     }
 
     fn edit_hotkey(&mut self) {
         let (Some(i), Some(index)) = (self.sel, self.selected_binding()) else { return };
         let existing: Binding = self.config.profiles[i].bindings[index].clone();
-        let Some(b) = editor::run(self.hwnd, self.dpi, &self.config.profiles[i], Some(&existing)) else { return };
+        let Some(b) = self.run_editor(i, Some(&existing)) else { return };
         self.config.profiles[i].bindings[index] = b;
-        self.dirty = true;
+        self.commit();
         self.refresh_hotkeys();
     }
 
     fn remove_hotkey(&mut self) {
         let (Some(i), Some(index)) = (self.sel, self.selected_binding()) else { return };
+        let p = &self.config.profiles[i];
+        let b = &p.bindings[index];
+        let monitor = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "the monitor".into());
+        let msg = format!("The hotkey for {monitor} ({}) will be removed.", monitors::describe_action(&b.inputs));
+        if !ui::confirm(self.hwnd, &format!("Remove {}?", b.hotkey.display()), &msg) {
+            return;
+        }
         self.config.profiles[i].bindings.remove(index);
-        self.dirty = true;
+        self.commit();
         self.refresh_hotkeys();
+    }
+
+    /// Shows the hotkey editor. The tray's hotkeys are paused for as long as it's open, so a
+    /// combination that's already in use can be recorded (or the editor used at all) without one firing.
+    fn run_editor(&mut self, profile: usize, existing: Option<&Binding>) -> Option<Binding> {
+        tray::post(tray::Event::Capturing(true));
+        let result = editor::run(self.hwnd, self.dpi, &self.config.profiles[profile], existing);
+        tray::post(tray::Event::Capturing(false));
+        result
     }
 
     fn test_hotkey(&mut self) {
@@ -786,10 +815,10 @@ impl Settings {
             (ID_EDIT_HOTKEY, BN_CLICKED) => self.edit_hotkey(),
             (ID_REMOVE_HOTKEY, BN_CLICKED) => self.remove_hotkey(),
             (ID_TEST_HOTKEY, BN_CLICKED) => self.test_hotkey(),
-            (ID_STARTUP | ID_NOTIFY, BN_CLICKED) => self.dirty = true,
-            (IDOK, _) => {
-                self.apply_save();
-                return After::Close;
+            (ID_STARTUP, BN_CLICKED) => self.set_startup(),
+            (ID_NOTIFY, BN_CLICKED) => {
+                self.config.show_notifications = ui::checked(self.c.notify);
+                self.commit();
             }
             (IDCANCEL, _) => return self.request_close(),
             _ => {}
@@ -824,28 +853,40 @@ impl Settings {
         }
     }
 
-    fn apply_save(&mut self) {
+    /// Hands a copy of the configuration to the tray app, which saves and applies it.
+    fn commit(&mut self) {
+        unsafe { KillTimer(self.hwnd, TIMER_TYPING) };
+        self.typing = false;
+        tray::post(tray::Event::ConfigChanged(self.config.clone()));
+    }
+
+    /// Commits after a short pause (for text being typed).
+    fn commit_soon(&mut self) {
+        self.typing = true;
+        // SetTimer with an existing id restarts it.
+        unsafe { SetTimer(self.hwnd, TIMER_TYPING, TYPING_MS, core::ptr::null()) };
+    }
+
+    fn set_startup(&mut self) {
+        let on = ui::checked(self.c.startup);
+        if !sys::set_startup(on) {
+            ui::alert(self.hwnd, ui::Icon::Warning, "Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.");
+            ui::set_checked(self.c.startup, sys::startup_enabled());
+        }
+    }
+
+    /// Nothing to ask: everything is already saved. Commits anything still being typed, and gives
+    /// blank names a placeholder, on the way out.
+    fn request_close(&mut self) -> After {
+        let mut pending = std::mem::take(&mut self.typing);
         for p in &mut self.config.profiles {
             if p.name.trim().is_empty() {
                 p.name = "Unnamed setup".into();
+                pending = true;
             }
         }
-        self.config.show_notifications = ui::checked(self.c.notify);
-        let start = ui::checked(self.c.startup);
-        if start != sys::startup_enabled() && !sys::set_startup(start) {
-            ui::alert(self.hwnd, ui::Icon::Warning, "Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.");
-        }
-        self.saved = true;
-        self.dirty = false;
-    }
-
-    fn request_close(&mut self) -> After {
-        if self.dirty && !self.saved {
-            match ui::ask_yes_no_cancel(self.hwnd, "Save your changes?", "You've changed your configurations. Save before closing?") {
-                IDYES => self.apply_save(),
-                IDNO => {}
-                _ => return After::Nothing,
-            }
+        if pending {
+            self.commit();
         }
         After::Close
     }

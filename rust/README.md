@@ -16,7 +16,7 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 
 ## What's the same
 
-- **Behaviour:** the same setup detection (external monitors identified by EDID serial, laptop panel ignored, missing monitors tolerated), hotkeys, tray menu and notifications.
+- **Behaviour:** the same setup detection (external monitors identified by EDID serial, laptop panel ignored, missing monitors tolerated), hotkeys, tray menu and notifications. As in C# 0.2.0, the main window saves every change as it's made (no Save button; names are saved once you stop typing), and hotkeys only pause while the hotkey editor is open.
 - **Settings file:** the same `%APPDATA%\InputSwitch\config.json`, in the same format. Existing Work and Home configurations load as they are.
 - **Command-line options:** the same `--settings`, `--diagnose [file]` and `INPUTSWITCH_CONFIG_DIR`.
 - **Tests:** the existing launch test (`tests/launch-smoke.ps1`) passes against it unchanged.
@@ -25,7 +25,7 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 ## What's different
 
 - **Look:** native Win32 controls with the Windows visual style, Segoe UI and per-monitor DPI scaling, instead of WPF's Fluent theme. There's no dark mode or Mica background.
-- **Dialogs:** Windows' own `TaskDialog`. Questions offer Yes / No rather than buttons labelled "Delete" or "Don't save".
+- **Dialogs:** Windows' own `TaskDialog`. Confirmations offer Yes / No rather than buttons labelled "Delete" or "Remove".
 - **Recording a hotkey:** click the box to start recording (it turns blue while it's listening). Win-key combinations are recorded too: while the box is listening, a short-lived keyboard hook stops Windows acting on the Win key. On Save, the editor refuses combinations Windows or another app already owns, and warns about known Windows shortcuts (such as Ctrl + Win + M for Magnifier), which Windows handles before any app sees them.
 - **Renaming a monitor:** done in place in the list (select it and press **Rename**, or F2).
 

@@ -358,6 +358,7 @@ pub const ES_AUTOHSCROLL: u32 = 0x0080;
 pub const EN_CHANGE: u16 = 0x0300;
 pub const SS_ENDELLIPSIS: u32 = 0x4000;
 pub const SS_NOPREFIX: u32 = 0x0080;
+pub const SS_RIGHT: u32 = 0x0002;
 pub const LBS_NOTIFY: u32 = 0x0001;
 pub const LBS_NOINTEGRALHEIGHT: u32 = 0x0100;
 pub const LB_ADDSTRING: u32 = 0x0180;
@@ -376,7 +377,6 @@ pub const CBN_SELCHANGE: u16 = 1;
 pub const IDOK: i32 = 1;
 pub const IDCANCEL: i32 = 2;
 pub const IDYES: i32 = 6;
-pub const IDNO: i32 = 7;
 
 // List view.
 pub const LVS_REPORT: u32 = 0x0001;
@@ -494,7 +494,6 @@ pub const NIN_BALLOONUSERCLICK: u16 = 0x0405;
 pub const TDCBF_OK_BUTTON: u32 = 0x1;
 pub const TDCBF_YES_BUTTON: u32 = 0x2;
 pub const TDCBF_NO_BUTTON: u32 = 0x4;
-pub const TDCBF_CANCEL_BUTTON: u32 = 0x8;
 pub const TD_WARNING_ICON: *const u16 = 0xFFFF as *const u16;
 pub const TD_INFORMATION_ICON: *const u16 = 0xFFFD as *const u16;
 
