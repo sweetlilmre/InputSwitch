@@ -26,6 +26,10 @@ internal sealed class TrayApp : ApplicationContext
     private Profile? _active;
     private ISettingsWindow? _configForm;
     private Action? _balloonClick;
+    /// <summary>The hotkey editor's key box is recording: hotkeys are paused meanwhile.</summary>
+    private bool _capturing;
+    /// <summary>The registration failures last reported, so the same ones aren't reported on every change.</summary>
+    private string _lastFailures = "";
 
     public TrayApp(bool openSettings = false)
     {
@@ -72,7 +76,11 @@ internal sealed class TrayApp : ApplicationContext
         _debounce.Start();
     }
 
-    /// <summary>Re-reads the connected monitors and activates the matching profile, creating one if the setup is new.</summary>
+    /// <summary>
+    /// Re-reads the connected monitors and activates the matching profile, creating one if the
+    /// setup is new. While the main window is open, new configurations and setup notifications wait
+    /// until it closes, so the window's list doesn't change under the user.
+    /// </summary>
     private void Evaluate(bool interactive)
     {
         _connected = MonitorService.Enumerate();
@@ -80,7 +88,7 @@ internal sealed class TrayApp : ApplicationContext
         var match = ProfileMatcher.Match(_config, fingerprint, _active);
 
         Profile? created = null;
-        if (match is null && fingerprint.Count > 0)
+        if (match is null && fingerprint.Count > 0 && _configForm is null)
         {
             created = ProfileMatcher.CreateFor(_connected, _config);
             _config.Profiles.Add(created);
@@ -91,9 +99,7 @@ internal sealed class TrayApp : ApplicationContext
         bool changed = match?.Id != _active?.Id;
         _active = match;
         _configForm?.UpdateConnection(_connected, _active?.Id);
-
-        if (_configForm is null)
-            RegisterHotkeys(reportFailures: changed);
+        RegisterHotkeys(reportFailures: changed);
         UpdateTooltip();
 
         if (created is not null)
@@ -109,7 +115,7 @@ internal sealed class TrayApp : ApplicationContext
                     ToolTipIcon.Info, () => OpenConfig(created.Id));
             }
         }
-        else if (changed && _active is not null)
+        else if (changed && _active is not null && _configForm is null)
         {
             Notify($"Display setup: {_active.Name}",
                 _active.Enabled ? $"{_active.Bindings.Count} hotkey(s) active." : "This configuration is disabled. Click to configure.",
@@ -129,14 +135,17 @@ internal sealed class TrayApp : ApplicationContext
     private void RegisterHotkeys(bool reportFailures)
     {
         _window.UnregisterAll();
-        if (_active is not { Enabled: true }) return;
+        if (_capturing || _active is not { Enabled: true }) return;
 
         var failed = new List<string>();
         foreach (var b in _active.Bindings)
             if (!b.Hotkey.IsEmpty && !_window.Register(b.Hotkey, b.Id))
                 failed.Add(b.Hotkey.ToString());
 
-        if (reportFailures && failed.Count > 0)
+        var failures = string.Join(", ", failed);
+        bool news = failures != _lastFailures;
+        _lastFailures = failures;
+        if (reportFailures && failed.Count > 0 && news)
             Notify("Some hotkeys could not be registered",
                 $"{string.Join(", ", failed)} — probably in use by another application.", ToolTipIcon.Warning,
                 () => OpenConfig(_active.Id));
@@ -175,23 +184,37 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        // Release the hotkeys while editing so they can be captured in the hotkey boxes.
-        _window.UnregisterAll();
-
         _configForm = SettingsWindow.Create(ConfigStore.Clone(_config), _connected, _active?.Id, selectProfileId, _switcher);
-        _configForm.Saved += edited =>
+        _configForm.Changed += OnSettingsChanged;
+        _configForm.CapturingHotkey += capturing =>
         {
-            _config = edited;
-            Save();
+            // Pause the hotkeys only while a combination is being recorded.
+            _capturing = capturing;
+            RegisterHotkeys(reportFailures: !capturing);
         };
         _configForm.Closed += (_, _) =>
         {
             _configForm = null;
-            _active = null; // profiles may have been edited or deleted; re-match from scratch
-            Evaluate(interactive: false); // also re-registers the hotkeys
+            _capturing = false;
+            Evaluate(interactive: false); // creates a configuration if the setup is now unknown
         };
         _configForm.Show();
         _configForm.Activate();
+    }
+
+    /// <summary>A change made in the main window: save it and apply it straight away.</summary>
+    private void OnSettingsChanged(AppConfig edited)
+    {
+        _config = edited;
+        Save();
+
+        // Profiles may have been added, deleted or changed; keep the same one active if it still fits.
+        var match = ProfileMatcher.Match(_config, ProfileMatcher.Fingerprint(_connected), _active);
+        bool changed = match?.Id != _active?.Id;
+        _active = match;
+        if (changed) _configForm?.UpdateConnection(_connected, _active?.Id);
+        RegisterHotkeys(reportFailures: true);
+        UpdateTooltip();
     }
 
     private void Save()

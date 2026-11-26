@@ -275,26 +275,23 @@
                 <!-- ============================================================ footer -->
                 <Border Grid.Row="1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="32,12">
                     <DockPanel LastChildFill="True">
-                        <!-- Progress and results (detecting inputs, testing a hotkey); hidden when empty. -->
-                        <TextBlock x:Name="ActivityText" DockPanel.Dock="Top" Margin="0,0,0,10" FontSize="12" TextWrapping="Wrap">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock" BasedOn="{StaticResource Secondary}">
-                                    <Style.Triggers>
-                                        <Trigger Property="Text" Value="">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
+                        <!-- Top line: progress and results (detecting inputs, testing a hotkey) on the left,
+                             a reminder that there's nothing to save on the right. -->
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ActivityText" FontSize="12" TextWrapping="Wrap" Style="{StaticResource Secondary}" Margin="0,0,16,0" />
+                            <TextBlock Grid.Column="1" FontSize="12" Text="Changes are saved automatically" Style="{StaticResource Secondary}" TextWrapping="NoWrap" />
+                        </Grid>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <Button Content="Save" MinWidth="100" Style="{DynamicResource AccentButtonStyle}" IsDefault="True" Click="OnSave" />
-                            <!-- IsCancel only closes modal dialogs; this window is modeless, so close it explicitly. -->
-                            <Button Content="Cancel" MinWidth="100" Margin="8,0,0,0" IsCancel="True" Click="OnCancel" />
+                            <!-- IsCancel (Esc) only closes modal dialogs; this window is modeless, so close it explicitly. -->
+                            <Button Content="Close" MinWidth="100" IsCancel="True" Click="OnClose" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <CheckBox x:Name="StartWithWindowsBox" Content="Start with Windows" Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
-                            <CheckBox x:Name="NotifyBox" Content="Notify when the setup changes" Margin="20,0,0,0" Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
+                            <CheckBox x:Name="StartWithWindowsBox" Content="Start with Windows" Checked="OnStartWithWindowsChanged" Unchecked="OnStartWithWindowsChanged" />
+                            <CheckBox x:Name="NotifyBox" Content="Notify when the setup changes" Margin="20,0,0,0" Checked="OnNotifyChanged" Unchecked="OnNotifyChanged" />
                         </StackPanel>
                     </DockPanel>
                 </Border>

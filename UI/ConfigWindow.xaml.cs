@@ -9,8 +9,10 @@ using InputSwitch.Monitors;
 namespace InputSwitch.UI;
 
 /// <summary>
-/// The configuration window: one configuration per display setup (left), with its monitors and
-/// hotkeys (right). Works on a copy of the config; changes take effect on Save.
+/// The main window: one configuration per display setup (left), with its monitors and hotkeys
+/// (right). Every change is saved and applied straight away: the window raises
+/// <see cref="Changed"/> with a copy of the configuration, and the tray app saves it and
+/// re-registers the hotkeys. Typed names are committed shortly after typing stops.
 /// </summary>
 internal sealed partial class ConfigWindow : Window, ISettingsWindow
 {
@@ -22,12 +24,13 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     private readonly List<ProfileRow> _rows = [];
     private readonly HashSet<string> _detectAttempted = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int?> _currentInputs = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Commits typed names once typing pauses, rather than on every keystroke.</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _typingTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private bool _detecting;
-    private bool _dirty;
     private bool _loading;
-    private bool _saved;
 
-    public event Action<AppConfig>? Saved;
+    public event Action<AppConfig>? Changed;
+    public event Action<bool>? CapturingHotkey;
 
     public ConfigWindow(AppConfig config, List<MonitorInfo> connected, string? activeId, string? selectId, InputSwitcher switcher)
     {
@@ -45,7 +48,36 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         NotifyBox.IsChecked = _config.ShowNotifications;
         _loading = false;
 
+        _typingTimer.Tick += (_, _) => Commit();
+
         RefreshProfileList(selectId ?? activeId);
+    }
+
+    // ------------------------------------------------------------------ applying changes
+
+    /// <summary>Hands a copy of the configuration to the tray app, which saves and applies it.</summary>
+    private void Commit()
+    {
+        _typingTimer.Stop();
+        Changed?.Invoke(ConfigStore.Clone(_config));
+    }
+
+    /// <summary>Commits after a short pause (for text being typed).</summary>
+    private void CommitSoon()
+    {
+        _typingTimer.Stop();
+        _typingTimer.Start();
+    }
+
+    /// <summary>
+    /// Shows the hotkey editor. Hotkeys are paused for as long as it's open, so a combination
+    /// that's already in use can be recorded (or the editor used at all) without one firing.
+    /// </summary>
+    private bool? ShowHotkeyEditor(BindingEditorWindow editor)
+    {
+        CapturingHotkey?.Invoke(true);
+        try { return editor.ShowDialog(); }
+        finally { CapturingHotkey?.Invoke(false); }
     }
 
     // ------------------------------------------------------------------ called by the tray app
@@ -144,17 +176,17 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     {
         if (_loading || SelectedProfile is not { } p) return;
         p.Name = NameBox.Text;
-        _dirty = true;
         RefreshSelectedRow();
+        CommitSoon();
     }
 
     private void OnEnabledChanged(object sender, RoutedEventArgs e)
     {
         if (_loading || SelectedProfile is not { } p) return;
         p.Enabled = EnabledBox.IsChecked == true;
-        _dirty = true;
         RefreshSelectedRow();
         UpdateStatusBanner();
+        Commit();
     }
 
     private void OnNewFromCurrent(object sender, RoutedEventArgs e)
@@ -176,7 +208,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
 
         var profile = ProfileMatcher.CreateFor(_connected, _config);
         _config.Profiles.Add(profile);
-        _dirty = true;
+        Commit();
         RefreshProfileList(profile.Id);
         NameBox.Focus();
         NameBox.SelectAll();
@@ -187,14 +219,14 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         if (SelectedProfile is not { } p) return;
         var hotkeys = p.Bindings.Count == 1 ? "its hotkey" : $"its {p.Bindings.Count} hotkeys";
         var note = IsConnectedProfile(p)
-            ? " This setup is connected now, so a fresh, empty configuration will be created for it when you save."
+            ? " This setup is connected now, so a fresh, empty configuration will be created for it when you close this window."
             : "";
         if (!FluentDialog.Confirm(this, DialogIcon.Warning, $"Delete \"{p.Name}\"?",
                 $"The configuration and {hotkeys} will be removed.{note}", "Delete"))
             return;
 
         _config.Profiles.Remove(p);
-        _dirty = true;
+        Commit();
         RefreshProfileList(null);
     }
 
@@ -210,7 +242,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         MonitorsList.ItemsSource = (SelectedProfile?.Monitors ?? [])
             .Select(m => new MonitorRow(m, IsConnected(m.MonitorId),
                 _currentInputs.TryGetValue(m.MonitorId, out var c) ? c : null,
-                () => _dirty = true))
+                CommitSoon))
             .ToList();
     }
 
@@ -229,7 +261,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
 
         foreach (var m in missing)
             p.Monitors.Add(new ProfileMonitor { MonitorId = m.Id, Name = m.DisplayName, Model = m.Model, Serial = m.Serial });
-        _dirty = true;
+        Commit();
         RefreshSelectedRow();
         UpdateStatusBanner();
         RefreshMonitors();
@@ -249,7 +281,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
 
         p.Monitors.Remove(m);
         p.Bindings.RemoveAll(b => b.MonitorId == m.MonitorId);
-        _dirty = true;
+        Commit();
         RefreshSelectedRow();
         UpdateStatusBanner();
         RefreshMonitors();
@@ -287,7 +319,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
                 if (inputs.Count > 0 && !inputs.SequenceEqual(pm.SupportedInputs))
                 {
                     pm.SupportedInputs = inputs;
-                    _dirty = true;
+                    Commit();
                 }
                 _currentInputs[pm.MonitorId] = current;
                 if (SelectedProfile == profile) RefreshMonitors();
@@ -329,7 +361,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         }
 
         var editor = new BindingEditorWindow(p, null) { Owner = this };
-        if (editor.ShowDialog() != true) return;
+        if (ShowHotkeyEditor(editor) != true) return;
 
         p.Bindings.Add(editor.Result);
         if (!p.Enabled)
@@ -340,7 +372,7 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
             RefreshSelectedRow();
             UpdateStatusBanner();
         }
-        _dirty = true;
+        Commit();
         RefreshHotkeys();
     }
 
@@ -348,19 +380,22 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     {
         if (SelectedProfile is not { } p || (sender as FrameworkElement)?.Tag is not HotkeyRow row) return;
         var editor = new BindingEditorWindow(p, row.Binding) { Owner = this };
-        if (editor.ShowDialog() != true) return;
+        if (ShowHotkeyEditor(editor) != true) return;
 
         int index = p.Bindings.IndexOf(row.Binding);
         p.Bindings[index] = editor.Result;
-        _dirty = true;
+        Commit();
         RefreshHotkeys();
     }
 
     private void OnRemoveHotkey(object sender, RoutedEventArgs e)
     {
         if (SelectedProfile is not { } p || (sender as FrameworkElement)?.Tag is not HotkeyRow row) return;
+        if (!FluentDialog.Confirm(this, DialogIcon.Warning, $"Remove {row.Binding.Hotkey}?",
+                $"The hotkey for {row.MonitorName} ({row.Action}) will be removed.", "Remove"))
+            return;
         p.Bindings.Remove(row.Binding);
-        _dirty = true;
+        Commit();
         RefreshHotkeys();
     }
 
@@ -383,52 +418,48 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         RefreshMonitors();
     }
 
-    // ------------------------------------------------------------------ save / close
+    // ------------------------------------------------------------------ options / close
 
-    private void OnOptionChanged(object sender, RoutedEventArgs e)
+    private void OnStartWithWindowsChanged(object sender, RoutedEventArgs e)
     {
-        if (!_loading) _dirty = true;
-    }
-
-    private void OnSave(object sender, RoutedEventArgs e)
-    {
-        ApplySave();
-        Close();
-    }
-
-    private void OnCancel(object sender, RoutedEventArgs e) => Close();
-
-    private void ApplySave()
-    {
-        foreach (var p in _config.Profiles.Where(p => string.IsNullOrWhiteSpace(p.Name)))
-            p.Name = "Unnamed setup";
-
-        _config.ShowNotifications = NotifyBox.IsChecked == true;
+        if (_loading) return;
         try
         {
-            bool start = StartWithWindowsBox.IsChecked == true;
-            if (start != Startup.IsEnabled) Startup.Set(start);
+            Startup.Set(StartWithWindowsBox.IsChecked == true);
         }
         catch (Exception ex)
         {
             Alert(DialogIcon.Warning, "Couldn't change Start with Windows", ex.Message);
+            _loading = true; StartWithWindowsBox.IsChecked = Startup.IsEnabled; _loading = false;
         }
-
-        Saved?.Invoke(_config);
-        _dirty = false;
-        _saved = true;
     }
+
+    private void OnNotifyChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _config.ShowNotifications = NotifyBox.IsChecked == true;
+        Commit();
+    }
+
+    private void OnClose(object sender, RoutedEventArgs e) => Close();
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (_dirty && !_saved)
+        // Anything still being typed, and names left blank, are committed on the way out.
+        bool pending = _typingTimer.IsEnabled;
+        foreach (var p in _config.Profiles.Where(p => string.IsNullOrWhiteSpace(p.Name)))
         {
-            var answer = FluentDialog.Show(this, DialogIcon.Question, "Save your changes?",
-                "You've changed your configurations. Save before closing?", "Save", "Don't save", "Cancel");
-            if (answer == DialogChoice.Cancel) { e.Cancel = true; return; }
-            if (answer == DialogChoice.Primary) ApplySave();
+            p.Name = "Unnamed setup";
+            pending = true;
         }
+        if (pending) Commit();
         base.OnClosing(e);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _typingTimer.Stop();
+        base.OnClosed(e);
     }
 
     // ------------------------------------------------------------------ helpers
