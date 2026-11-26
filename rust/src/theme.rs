@@ -89,6 +89,8 @@ struct Style {
 
 thread_local! {
     static PALETTE: Cell<Palette> = Cell::new(make_palette(false, rgb(0, 95, 184)));
+    /// The user's choice from the Dark mode switch; None follows Windows.
+    static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
     static BANNER: Cell<u32> = const { Cell::new(0) };
     static BRUSHES: RefCell<HashMap<u32, isize>> = RefCell::new(HashMap::new());
     static STYLES: RefCell<HashMap<HWND, Style>> = RefCell::new(HashMap::new());
@@ -127,13 +129,20 @@ fn system_accent() -> u32 {
     read_dword(r"Software\Microsoft\Windows\DWM", "AccentColor").map(|c| c & 0x00FF_FFFF).unwrap_or(rgb(0, 95, 184))
 }
 
-/// Re-reads the Windows settings. Returns true if anything changed.
+/// Re-reads the Windows settings (and the user's light/dark choice). Returns true if anything changed.
 pub fn reload() -> bool {
-    let new = make_palette(system_dark(), system_accent());
+    let dark = OVERRIDE.with(|o| o.get()).unwrap_or_else(system_dark);
+    let new = make_palette(dark, system_accent());
     let old = palette();
     PALETTE.with(|p| p.set(new));
     BANNER.with(|b| if b.get() == 0 || b.get() == old.neutral { b.set(new.neutral) });
     unsafe {
+        // SetPreferredAppMode: AllowDark (1) follows Windows; ForceDark (2) / ForceLight (3) for the
+        // user's choice, so menus and scroll bars match it too.
+        let mode = match OVERRIDE.with(|o| o.get()) { None => 1, Some(true) => 2, Some(false) => 3 };
+        if let Some(f) = uxtheme::<unsafe extern "system" fn(i32) -> i32>(135) {
+            f(mode);
+        }
         if let Some(f) = uxtheme::<unsafe extern "system" fn()>(104) {
             f(); // RefreshImmersiveColorPolicyState
         }
@@ -154,14 +163,48 @@ unsafe fn uxtheme<F: Copy>(ordinal: usize) -> Option<F> {
     (!p.is_null()).then(|| core::mem::transmute_copy::<*const core::ffi::c_void, F>(&p))
 }
 
-/// Call once at startup: lets menus and controls follow the dark setting.
-pub fn init_app() {
+const SETTINGS_KEY: &str = r"Software\InputSwitch";
+const THEME_VALUE: &str = "Theme";
+
+/// The saved light/dark choice: Some(true) dark, Some(false) light, None (not set) follows Windows.
+/// Kept in the registry rather than config.json, so the shared settings file stays exactly what
+/// the C# app reads and writes.
+fn saved_override() -> Option<bool> {
     unsafe {
-        // SetPreferredAppMode(AllowDark = 1)
-        if let Some(f) = uxtheme::<unsafe extern "system" fn(i32) -> i32>(135) {
-            f(1);
+        let mut key: HKEY = 0;
+        if RegOpenKeyExW(HKEY_CURRENT_USER, wide(SETTINGS_KEY).as_ptr(), 0, KEY_READ, &mut key) != 0 {
+            return None;
+        }
+        let mut buf = [0u16; 16];
+        let (mut len, mut kind) = ((buf.len() * 2) as u32, 0u32);
+        let ok = RegQueryValueExW(key, wide(THEME_VALUE).as_ptr(), core::ptr::null_mut(), &mut kind, buf.as_mut_ptr() as *mut u8, &mut len) == 0;
+        RegCloseKey(key);
+        match (ok, from_wide(&buf).as_str()) {
+            (true, "dark") => Some(true),
+            (true, "light") => Some(false),
+            _ => None,
         }
     }
+}
+
+/// Switches to dark or light, remembers the choice, and reloads the palette.
+pub fn set_dark(dark: bool) {
+    OVERRIDE.with(|o| o.set(Some(dark)));
+    unsafe {
+        let mut key: HKEY = 0;
+        if RegCreateKeyExW(HKEY_CURRENT_USER, wide(SETTINGS_KEY).as_ptr(), 0, core::ptr::null(), 0, KEY_WRITE,
+            core::ptr::null(), &mut key, core::ptr::null_mut()) == 0 {
+            let value = wide(if dark { "dark" } else { "light" });
+            RegSetValueExW(key, wide(THEME_VALUE).as_ptr(), 0, REG_SZ, value.as_ptr() as *const u8, (value.len() * 2) as u32);
+            RegCloseKey(key);
+        }
+    }
+    reload();
+}
+
+/// Call once at startup: lets menus and controls follow the dark setting.
+pub fn init_app() {
+    OVERRIDE.with(|o| o.set(saved_override()));
     reload();
 }
 

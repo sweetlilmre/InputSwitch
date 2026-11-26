@@ -40,11 +40,12 @@ const ID_REMOVE_HOTKEY: i32 = 113;
 const ID_TEST_HOTKEY: i32 = 114;
 const ID_STARTUP: i32 = 115;
 const ID_NOTIFY: i32 = 116;
+const ID_DARK: i32 = 117;
 
 /// Client size at 96 DPI.
 const WIDTH: i32 = 1000;
 const HEIGHT: i32 = 700;
-const MIN_WIDTH: i32 = 900;
+const MIN_WIDTH: i32 = 960;
 const MIN_HEIGHT: i32 = 620;
 /// Height of a two-line item in the configurations list, at 96 DPI.
 const PROFILE_ITEM_HEIGHT: i32 = 52;
@@ -95,6 +96,7 @@ struct Controls {
     activity: HWND,
     startup: HWND,
     notify: HWND,
+    dark: HWND,
     saved_note: HWND,
     close: HWND,
 }
@@ -158,6 +160,7 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     with(|s| {
         widgets::set_checked(s.c.startup, sys::startup_enabled());
         widgets::set_checked(s.c.notify, s.config.show_notifications);
+        widgets::set_checked(s.c.dark, theme::palette().dark);
         s.refresh_profiles(select.as_deref());
         s.layout();
     });
@@ -332,6 +335,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         activity: ui::label_on(h, "", n, Layer, true),
         startup: widgets::checkbox(h, "Start with Windows", ID_STARTUP, f, Layer),
         notify: widgets::checkbox(h, "Notify when the setup changes", ID_NOTIFY, f, Layer),
+        dark: widgets::switch(h, "Dark mode", ID_DARK, f, Layer),
         saved_note,
         close: widgets::button(h, "Close", IDCANCEL, None, f, Layer),
     };
@@ -370,7 +374,7 @@ impl Controls {
         vec![self.configs_label, self.profiles, self.new, self.delete, self.version, self.name_label, self.name, self.enabled,
             self.status, self.monitors_label, self.monitors, self.rename, self.detect, self.add_connected, self.remove_monitor,
             self.hotkeys_label, self.hotkeys, self.add_hotkey, self.edit_hotkey, self.remove_hotkey, self.test_hotkey,
-            self.activity, self.startup, self.notify, self.saved_note, self.close]
+            self.activity, self.startup, self.notify, self.dark, self.saved_note, self.close]
     }
 
     /// The controls that only make sense with a configuration selected.
@@ -428,8 +432,9 @@ impl Settings {
         // Footer.
         let bottom = h - 16 - 32;
         p(c.close, re - 100, bottom, 100, 32);
-        p(c.startup, rx, bottom + 4, 180, 24);
-        p(c.notify, rx + 190, bottom + 4, 260, 24);
+        p(c.startup, rx, bottom + 4, 160, 24);
+        p(c.notify, rx + 166, bottom + 4, 230, 24);
+        p(c.dark, rx + 412, bottom + 4, 130, 24);
         p(c.activity, rx, bottom - 28, rw - 230, 20);
         p(c.saved_note, re - 220, bottom - 28, 220, 20);
 
@@ -983,6 +988,10 @@ impl Settings {
             (ID_REMOVE_HOTKEY, BN_CLICKED) => self.remove_hotkey(),
             (ID_TEST_HOTKEY, BN_CLICKED) => self.test_hotkey(),
             (ID_STARTUP, BN_CLICKED) => self.set_startup(),
+            (ID_DARK, BN_CLICKED) => {
+                theme::set_dark(widgets::checked(self.c.dark));
+                self.retheme();
+            }
             (ID_NOTIFY, BN_CLICKED) => {
                 self.config.show_notifications = widgets::checked(self.c.notify);
                 self.commit();

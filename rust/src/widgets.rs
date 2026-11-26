@@ -25,6 +25,8 @@ pub enum Kind {
     Standard,
     Accent,
     Check,
+    /// A WinUI-style on/off toggle switch.
+    Switch,
 }
 
 struct Info {
@@ -60,6 +62,10 @@ pub fn checkbox(parent: HWND, text: &str, id: i32, fonts: &crate::ui::Fonts, sur
     create(parent, text, id, Kind::Check, None, fonts.normal, fonts.icon, surface)
 }
 
+pub fn switch(parent: HWND, text: &str, id: i32, fonts: &crate::ui::Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::Switch, None, fonts.normal, fonts.icon, surface)
+}
+
 /// Updates the fonts after a DPI change.
 pub fn set_fonts(h: HWND, fonts: &crate::ui::Fonts) {
     INFO.with(|i| {
@@ -83,9 +89,9 @@ pub fn set_checked(h: HWND, on: bool) {
     unsafe { RedrawWindow(h, core::ptr::null(), 0, RDW_INVALIDATE) };
 }
 
-/// Call on BN_CLICKED: a checkbox flips its state.
+/// Call on BN_CLICKED: a checkbox or switch flips its state.
 pub fn clicked(h: HWND) {
-    let is_check = INFO.with(|i| i.borrow().get(&h).map(|x| x.kind == Kind::Check)).unwrap_or(false);
+    let is_check = INFO.with(|i| i.borrow().get(&h).map(|x| matches!(x.kind, Kind::Check | Kind::Switch))).unwrap_or(false);
     if is_check {
         set_checked(h, !checked(h));
     }
@@ -138,6 +144,29 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
     let text = crate::ui::get_text(h);
 
     theme::fill(hdc, r, theme::color_of(theme::surface_of(h)));
+
+    if kind == Kind::Switch {
+        // Track: a pill, accent-filled when on. Knob: a circle at the left (off) or right (on).
+        let (tw, th) = (s(40), s(20));
+        let top = r.top + (r.bottom - r.top - th) / 2;
+        let track = RECT { left: r.left + s(1), top, right: r.left + s(1) + tw, bottom: top + th };
+        let (track_fill, track_border, knob) = if checked {
+            (if disabled { p.text_disabled } else if hot { p.accent_hot } else { p.accent }, None, p.on_accent)
+        } else {
+            (if hot && !disabled { p.control_hot } else { p.control }, Some(if disabled { p.text_disabled } else { p.text2 }), if disabled { p.text_disabled } else { p.text2 })
+        };
+        theme::round_rect(hdc, track, th / 2, track_fill, track_border);
+        let k = s(if hot && !disabled { 14 } else { 12 });
+        let kx = if checked { track.right - s(4) - k } else { track.left + s(4) };
+        let ky = top + (th - k) / 2;
+        theme::round_rect(hdc, RECT { left: kx, top: ky, right: kx + k, bottom: ky + k }, k / 2, knob, None);
+        let label = RECT { left: track.right + s(10), top: r.top, right: r.right, bottom: r.bottom };
+        theme::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if focused {
+            theme::round_rect(hdc, RECT { left: track.left - s(2), top: track.top - s(2), right: track.right + s(2), bottom: track.bottom + s(2) }, th / 2 + s(2), theme::NO_FILL, Some(p.text));
+        }
+        return true;
+    }
 
     if kind == Kind::Check {
         let size = s(18);
