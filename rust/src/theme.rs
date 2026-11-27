@@ -52,7 +52,7 @@ pub const fn rgb(r: u32, g: u32, b: u32) -> u32 {
     r | (g << 8) | (b << 16)
 }
 
-fn mix(a: u32, b: u32, t: f32) -> u32 {
+pub fn mix(a: u32, b: u32, t: f32) -> u32 {
     let ch = |c: u32, shift: u32| ((c >> shift) & 0xFF) as f32;
     let m = |shift| ((ch(a, shift) * (1.0 - t) + ch(b, shift) * t).round() as u32) << shift;
     m(0) | m(8) | m(16)

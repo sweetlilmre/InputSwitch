@@ -4,6 +4,7 @@
 #![windows_subsystem = "windows"]
 
 mod config;
+mod dialog;
 mod editor;
 mod ffi;
 mod hotkey;

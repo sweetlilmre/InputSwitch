@@ -689,7 +689,7 @@ impl Settings {
             p.monitors.iter().map(|m| m.monitor_id.to_lowercase()).collect::<HashSet<_>>() == fp
         }) {
             let msg = format!("\"{}\" already covers exactly these monitors. When two configurations match, the first one in the list is used.", existing.name);
-            if !ui::confirm(self.hwnd, "Create another configuration?", &msg) {
+            if !ui::confirm(self.hwnd, "Create another configuration?", &msg, "Create") {
                 return;
             }
         }
@@ -709,7 +709,7 @@ impl Settings {
         let p = &self.config.profiles[i];
         let hotkeys = if p.bindings.len() == 1 { "its hotkey".to_string() } else { format!("its {} hotkeys", p.bindings.len()) };
         let note = if self.is_active(i) { " This setup is connected now, so a fresh, empty configuration will be created for it when you close this window." } else { "" };
-        if !ui::confirm(self.hwnd, &format!("Delete \"{}\"?", p.name), &format!("The configuration and {hotkeys} will be removed.{note}")) {
+        if !ui::confirm(self.hwnd, &format!("Delete \"{}\"?", p.name), &format!("The configuration and {hotkeys} will be removed.{note}"), "Delete") {
             return;
         }
         self.config.profiles.remove(i);
@@ -796,7 +796,7 @@ impl Settings {
         let used = p.bindings.iter().filter(|b| b.monitor_id.eq_ignore_ascii_case(&m.monitor_id)).count();
         let also = match used { 0 => String::new(), 1 => " Its hotkey will be removed too.".into(), n => format!(" Its {n} hotkeys will be removed too.") };
         let msg = format!("Configurations are recognised by their monitors, so this changes which setups \"{}\" matches.{also}", p.name);
-        if !ui::confirm(self.hwnd, &format!("Remove {}?", m.name), &msg) {
+        if !ui::confirm(self.hwnd, &format!("Remove {}?", m.name), &msg, "Remove") {
             return;
         }
         let id = self.config.profiles[i].monitors.remove(index).monitor_id;
@@ -950,7 +950,7 @@ impl Settings {
         let b = &p.bindings[index];
         let monitor = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "the monitor".into());
         let msg = format!("The hotkey for {monitor} ({}) will be removed.", monitors::describe_action(&b.inputs));
-        if !ui::confirm(self.hwnd, &format!("Remove {}?", b.hotkey.display()), &msg) {
+        if !ui::confirm(self.hwnd, &format!("Remove {}?", b.hotkey.display()), &msg, "Remove") {
             return;
         }
         self.config.profiles[i].bindings.remove(index);

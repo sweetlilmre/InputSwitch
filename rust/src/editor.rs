@@ -372,8 +372,8 @@ impl Editor {
         }
         // Some Windows shortcuts are handled before any app sees them, even when registering works.
         if let Some(what) = crate::reserved::windows_use(&hk) {
-            let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch. Use it anyway?", hk.display());
-            if !ui::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg) {
+            let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch.", hk.display());
+            if !ui::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway") {
                 return;
             }
         }

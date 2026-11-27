@@ -273,25 +273,23 @@ pub enum Icon {
     Warning,
 }
 
-fn td(owner: HWND, icon: *const u16, main: &str, content: &str, buttons: u32) -> i32 {
-    let mut pressed = 0;
-    unsafe {
-        TaskDialog(owner, hinstance(), wide(TITLE).as_ptr(), wide(main).as_ptr(), wide(content).as_ptr(), buttons, icon, &mut pressed);
-    }
-    pressed
-}
-
+/// A themed message with an OK button.
 pub fn alert(owner: HWND, icon: Icon, main: &str, content: &str) {
-    let i = match icon {
-        Icon::Info => TD_INFORMATION_ICON,
-        Icon::Warning => TD_WARNING_ICON,
+    let icon = match icon {
+        Icon::Info => crate::dialog::Icon::Info,
+        Icon::Warning => crate::dialog::Icon::Warning,
     };
-    td(owner, i, main, content, TDCBF_OK_BUTTON);
+    crate::dialog::show(owner, icon, main, content, &["OK"]);
 }
 
-/// Yes/No question with a warning icon. True for Yes.
-pub fn confirm(owner: HWND, main: &str, content: &str) -> bool {
-    td(owner, TD_WARNING_ICON, main, content, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON) == IDYES
+/// A themed confirmation with a warning icon: ction (e.g. "Delete") or Cancel. True for ction.
+pub fn confirm(owner: HWND, main: &str, content: &str, action: &str) -> bool {
+    crate::dialog::show(owner, crate::dialog::Icon::Warning, main, content, &[action, "Cancel"]) == 0
+}
+
+/// A Segoe Fluent Icons font at points.
+pub fn icon_font(dpi: u32, points: i32) -> HFONT {
+    font_face(icon_face(), dpi, points, 400)
 }
 
 /// Runs a modal message loop for `dialog` (owner disabled) until `done()` is true.

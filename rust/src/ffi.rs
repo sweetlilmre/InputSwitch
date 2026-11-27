@@ -334,6 +334,8 @@ pub const WS_VSCROLL: u32 = 0x0020_0000;
 pub const WS_TABSTOP: u32 = 0x0001_0000;
 pub const WS_EX_DLGMODALFRAME: u32 = 0x0000_0001;
 pub const WS_EX_CONTROLPARENT: u32 = 0x0001_0000;
+pub const WS_EX_TOPMOST: u32 = 0x0000_0008;
+pub const WS_EX_APPWINDOW: u32 = 0x0004_0000;
 pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
 
 pub const SW_SHOW: i32 = 5;
@@ -370,7 +372,6 @@ pub const CB_SETCURSEL: u32 = 0x014E;
 pub const CBN_SELCHANGE: u16 = 1;
 pub const IDOK: i32 = 1;
 pub const IDCANCEL: i32 = 2;
-pub const IDYES: i32 = 6;
 
 // List view.
 pub const LVS_REPORT: u32 = 0x0001;
@@ -483,8 +484,7 @@ pub const NIN_BALLOONUSERCLICK: u16 = 0x0405;
 
 // TaskDialog.
 pub const TDCBF_OK_BUTTON: u32 = 0x1;
-pub const TDCBF_YES_BUTTON: u32 = 0x2;
-pub const TDCBF_NO_BUTTON: u32 = 0x4;
+pub const TDCBF_CANCEL_BUTTON: u32 = 0x8;
 pub const TD_WARNING_ICON: *const u16 = 0xFFFF as *const u16;
 pub const TD_INFORMATION_ICON: *const u16 = 0xFFFD as *const u16;
 
@@ -682,6 +682,10 @@ pub const DT_VCENTER: u32 = 0x0004;
 pub const DT_SINGLELINE: u32 = 0x0020;
 pub const DT_NOPREFIX: u32 = 0x0800;
 pub const DT_END_ELLIPSIS: u32 = 0x8000;
+pub const DT_WORDBREAK: u32 = 0x0010;
+pub const DT_CALCRECT: u32 = 0x0400;
+pub const MB_ICONEXCLAMATION: u32 = 0x30;
+pub const MB_ICONASTERISK: u32 = 0x40;
 pub const TME_LEAVE: u32 = 0x0002;
 pub const TRANSPARENT: i32 = 1;
 pub const PS_SOLID: i32 = 0;
@@ -734,6 +738,9 @@ extern "system" {
     pub fn DrawTextW(hdc: HDC, text: *const u16, len: i32, r: *mut RECT, format: u32) -> i32;
     pub fn TrackMouseEvent(t: *mut TRACKMOUSEEVENT) -> BOOL;
     pub fn RedrawWindow(h: HWND, r: *const RECT, rgn: isize, flags: u32) -> BOOL;
+    pub fn GetDC(h: HWND) -> HDC;
+    pub fn ReleaseDC(h: HWND, hdc: HDC) -> i32;
+    pub fn MessageBeep(kind: u32) -> BOOL;
 }
 
 #[link(name = "gdi32")]
