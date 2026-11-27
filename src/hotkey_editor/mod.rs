@@ -8,6 +8,7 @@ mod key_box;
 use crate::config::{Binding, Profile, ProfileMonitor};
 use crate::ffi::*;
 use crate::hotkey::Hotkey;
+use crate::i18n::{t, tf};
 use crate::monitors;
 use crate::ui::dialog::{self, Icon};
 use crate::ui::draw::{self, rect};
@@ -90,7 +91,7 @@ fn with<R>(f: impl FnOnce(&mut Editor) -> R) -> Option<R> {
 pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>) -> Option<Binding> {
     ui::register_class(CLASS, wndproc, true, 0);
 
-    let title = if existing.is_some() { "Edit hotkey" } else { "Add hotkey" };
+    let title = t(if existing.is_some() { "editor.edit" } else { "editor.add" });
     let hwnd = ui::popup_window(CLASS, title, owner, WIDTH, HEIGHT, dpi);
     let fonts = Rc::new(Fonts::new(dpi));
     let (c, frames) = create_controls(hwnd, &fonts, existing.map(|b| b.hotkey).unwrap_or_default());
@@ -125,19 +126,19 @@ fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames
         label
     };
 
-    field_label("Monitor", 16);
+    field_label(t("editor.monitor"), 16);
     let monitor = ui::drop_down::create(h, "", ID_MONITOR, f, Window);
     p(monitor, PAD, 42, CONTENT_W, FIELD_H);
 
-    field_label("Key combination", 90);
+    field_label(t("editor.key_combination"), 90);
     // Says whether the box is recording; kept up to date by the key box.
     let key_hint = hint("", 154, 2);
     let hotkey_frame = r(PAD, 116, CONTENT_W, FIELD_H);
     let hotkey = key_box::create(h, ID_HOTKEY, f.normal, initial, key_hint);
     p(hotkey, PAD + 10, 122, CONTENT_W - 20, 20);
 
-    field_label("Inputs", 196);
-    hint("Tick one input to switch to it, two to toggle between them, or more to cycle through them in the order shown.", 220, 2);
+    field_label(t("editor.inputs"), 196);
+    hint(t("editor.inputs_hint"), 220, 2);
     // A card holding the inputs, with the up and down buttons on its right.
     let inputs_frame = r(PAD, INPUTS_Y, CONTENT_W, INPUTS_H);
     let inputs = input_list::create(h, ID_INPUTS, f);
@@ -147,12 +148,12 @@ fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames
     p(arrow(ID_UP, widgets::ICON_UP), arrow_x, INPUTS_Y + 10, ARROW_W, BUTTON_H);
     p(arrow(ID_DOWN, widgets::ICON_DOWN), arrow_x, INPUTS_Y + 10 + BUTTON_H + 4, ARROW_W, BUTTON_H);
 
-    p(ui::label(h, "Other input code (hex)", f.normal, Window, true), PAD, CODE_Y + 6, 200, 20);
+    p(ui::label(h, t("editor.other_code"), f.normal, Window, true), PAD, CODE_Y + 6, 200, 20);
     let (code_w, add_w) = (90, 64);
     let code_frame = r(PAD + CONTENT_W - add_w - 8 - code_w, CODE_Y, code_w, FIELD_H);
     let code = TextBox::create(h, ID_CODE, f.normal, f);
     code.place(code_frame, dpi);
-    p(widgets::button(h, "Add", ID_ADD_CODE, None, f, Window), PAD + CONTENT_W - add_w, CODE_Y, add_w, FIELD_H);
+    p(widgets::button(h, t("common.add"), ID_ADD_CODE, None, f, Window), PAD + CONTENT_W - add_w, CODE_Y, add_w, FIELD_H);
 
     // What the hotkey will do, on a banner with a keyboard icon.
     let summary_frame = r(PAD, SUMMARY_Y, CONTENT_W, SUMMARY_H);
@@ -161,8 +162,8 @@ fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames
 
     let footer = r(0, FOOTER_Y, WIDTH, FOOTER_H);
     let by = FOOTER_Y + (FOOTER_H - BUTTON_H) / 2;
-    p(widgets::accent_button(h, "Save", IDOK, None, f, Layer), WIDTH - PAD - BUTTON_W - 8 - BUTTON_W, by, BUTTON_W, BUTTON_H);
-    p(widgets::button(h, "Cancel", IDCANCEL, None, f, Layer), WIDTH - PAD - BUTTON_W, by, BUTTON_W, BUTTON_H);
+    p(widgets::accent_button(h, t("common.save"), IDOK, None, f, Layer), WIDTH - PAD - BUTTON_W - 8 - BUTTON_W, by, BUTTON_W, BUTTON_H);
+    p(widgets::button(h, t("common.cancel"), IDCANCEL, None, f, Layer), WIDTH - PAD - BUTTON_W, by, BUTTON_W, BUTTON_H);
 
     let frames = Frames { hotkey: hotkey_frame, inputs: inputs_frame, code: code_frame, summary: summary_frame, footer };
     (Controls { monitor, inputs, code, summary }, frames)
@@ -264,7 +265,7 @@ impl Editor {
         let Some(m) = self.selected_monitor() else { return ui::set_text(self.c.summary, "") };
         let mut text = monitors::describe_action(&input_list::checked(self.c.inputs));
         if m.supported_inputs.is_empty() {
-            text.push_str("   (inputs not detected; common inputs listed)");
+            text = format!("{text}   {}", t("editor.common_inputs"));
         }
         ui::set_text(self.c.summary, &text);
     }
@@ -272,7 +273,7 @@ impl Editor {
     /// Add: puts the typed input code in the list.
     fn add_code(&mut self) {
         let Some(code) = parse_code(&ui::get_text(self.c.code.edit)) else {
-            dialog::alert(self.hwnd, Icon::Warning, "Not a valid input code", "Enter a hexadecimal code between 01 and FF, for example 1B.");
+            dialog::alert(self.hwnd, Icon::Warning, t("editor.bad_code"), t("editor.bad_code_detail"));
             return;
         };
         input_list::add(self.c.inputs, code);
@@ -304,16 +305,15 @@ impl Editor {
     /// problem (rather than one heading for all of them), and what to do about it.
     fn problem(&self, hk: Hotkey, inputs: &[u8]) -> Option<(String, &'static str)> {
         if self.selected_monitor().is_none() {
-            Some(("Choose a monitor".into(), "Pick the monitor this hotkey should switch."))
+            Some((t("editor.no_monitor").into(), t("editor.no_monitor_detail")))
         } else if hk.is_empty() {
-            Some(("No key combination yet".into(), "Click the key combination box and press the keys to use."))
+            Some((t("editor.no_keys").into(), t("editor.no_keys_detail")))
         } else if !hk.is_valid() {
-            Some(("That combination can't be used".into(), "Use Ctrl, Alt or Win with the key (or one of F13–F24)."))
+            Some((t("editor.bad_keys").into(), t("editor.bad_keys_detail")))
         } else if inputs.is_empty() {
-            Some(("This hotkey isn't finished".into(), "Tick at least one input."))
+            Some((t("editor.no_inputs").into(), t("editor.no_inputs_detail")))
         } else if self.taken.contains(&hk) {
-            Some((format!("{} is already in use", hk.display()),
-                "Another hotkey in this configuration uses it. Choose a different combination, or change the other hotkey."))
+            Some((tf("editor.in_use", &[("hotkey", &hk.display())]), t("editor.in_use_here")))
         } else {
             None
         }
@@ -325,14 +325,13 @@ impl Editor {
         // Windows refuses combinations already owned by Windows or another app. (The tray's own
         // hotkeys are paused while the editor is open, so they don't count.)
         if self.existing.as_ref().map(|b| b.hotkey) != Some(hk) && !can_register(self.hwnd, hk) {
-            dialog::alert(self.hwnd, Icon::Warning, &format!("{} is already in use", hk.display()),
-                "Windows or another app already uses this combination, so InputSwitch can't. Choose another one.");
+            dialog::alert(self.hwnd, Icon::Warning, &tf("editor.in_use", &[("hotkey", &hk.display())]), t("editor.in_use_elsewhere"));
             return false;
         }
         // Some Windows shortcuts are handled before any app sees them, even when registering works.
         if let Some(what) = crate::reserved::windows_use(&hk) {
-            let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch.", hk.display());
-            return dialog::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway");
+            let msg = tf("editor.windows_shortcut_detail", &[("hotkey", &hk.display()), ("what", &what)]);
+            return dialog::confirm(self.hwnd, &tf("editor.windows_shortcut", &[("hotkey", &hk.display())]), &msg, t("editor.use_anyway"));
         }
         true
     }

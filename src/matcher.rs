@@ -50,7 +50,7 @@ pub fn create_for(monitors: &[MonitorInfo], config: &AppConfig) -> Profile {
 
 /// "Setup 3" for a third configuration, or "Setup 3 (2)" and so on if that name is taken.
 fn unique_name(config: &AppConfig) -> String {
-    let base = format!("Setup {}", config.profiles.len() + 1);
+    let base = crate::i18n::tf("profile.new_name", &[("number", &(config.profiles.len() + 1))]);
     let taken = |name: &str| config.profiles.iter().any(|p| p.name.eq_ignore_ascii_case(name));
     let mut name = base.clone();
     let mut n = 2;

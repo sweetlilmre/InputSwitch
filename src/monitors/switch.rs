@@ -1,6 +1,7 @@
 //! Switching inputs: one input switches to it; several are stepped through in order (two is
 //! a toggle). Blocking (DDC/CI is slow): call these off the UI thread.
 
+use crate::i18n::{t, tf};
 use super::ddc::{self, Physical};
 use super::{inputs, MonitorInfo};
 use std::collections::HashMap;
@@ -25,7 +26,7 @@ fn remember(m: &MonitorInfo, input: u8) {
 /// Runs a hotkey's action. Returns the input switched to.
 pub fn run_binding(inputs: &[u8], m: &MonitorInfo) -> Result<u8, String> {
     match inputs {
-        [] => Err("No inputs are selected for this hotkey.".into()),
+        [] => Err(t("switch.no_inputs").into()),
         [only] => switch_to(m, *only),
         // Reading the current input and switching happen in one conversation with the monitor,
         // so two quick presses can't both read the same input and switch to the same next one.
@@ -52,11 +53,7 @@ fn finish(m: &MonitorInfo, switched: Option<u8>, attempted: u8) -> Result<u8, St
             remember(m, input);
             Ok(input)
         }
-        None => Err(format!(
-            "{} did not accept the switch to {}. Check that DDC/CI is enabled in the monitor's on-screen menu.",
-            m.display_name(),
-            inputs::short_name(attempted)
-        )),
+        None => Err(tf("switch.refused", &[("monitor", &m.display_name()), ("input", &inputs::short_name(attempted))])),
     }
 }
 

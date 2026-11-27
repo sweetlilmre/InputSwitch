@@ -1,0 +1,232 @@
+# InputSwitch: Afrikaans. See en.txt for how to translate.
+
+# ------------------------------------------------------------------------- common
+common.ok = OK
+common.cancel = Kanselleer
+common.close = Maak toe
+common.remove = Verwyder
+common.delete = Skrap
+common.create = Skep
+common.add = Voeg by
+common.save = Stoor
+common.connected = Gekoppel
+common.not_connected = Nie gekoppel nie
+common.none = (geen)
+
+# ------------------------------------------------------------------------- start-up
+startup.already_running = InputSwitch loop reeds
+startup.already_running_detail = Soek sy ikoon in die kennisgewingarea. Klik daarop om die instellings oop te maak.
+startup.unreadable_settings = Jou instellings kon nie gelees word nie
+startup.unreadable_settings_detail = {error}\n\nInputSwitch sal met nuwe instellings begin.
+storage.left_as_is = {error}. Die lêer is gelaat soos dit is; veranderinge sal nie hierdie sessie gestoor word nie.
+storage.kept_as_bad = {error}. Die onleesbare lêer is as config.json.bad in {folder} gehou.
+storage.not_saved = {error}. Veranderinge sal nie hierdie sessie gestoor word nie.
+storage.not_overwritten = Die instellingslêer kon nie gelees word toe InputSwitch begin het nie, dus word dit nie oorskryf nie. Herbegin InputSwitch om weer te probeer.
+
+# ------------------------------------------------------------------------- tray icon and menu
+tray.tip_none = InputSwitch — geen konfigurasie
+tray.tip = InputSwitch — {name}
+tray.tip_disabled = InputSwitch — {name} (gedeaktiveer)
+tray.no_external = Geen eksterne monitors nie
+tray.unknown_setup = Onbekende skermopstelling
+tray.setup = Opstelling: {name}
+tray.setup_disabled = Opstelling: {name} (gedeaktiveer)
+tray.switch_monitor_to = Skakel {monitor} oor na
+tray.configure = Konfigureer…
+tray.redetect = Bespeur skerms weer
+tray.start_with_windows = Begin saam met Windows
+tray.open_folder = Maak konfigurasiegids oop
+tray.version = InputSwitch {version}
+tray.exit = Sluit af
+
+# ------------------------------------------------------------------------- notifications
+notify.new_setup = Nuwe skermopstelling bespeur
+notify.new_setup_detail = "{name}" is vir {monitors} geskep. Klik om dit te benoem en sneltoetse toe te ken.
+notify.monitor_count = {count} monitors
+notify.setup = Skermopstelling: {name}
+notify.setup_disabled = Hierdie konfigurasie is gedeaktiveer. Klik om te konfigureer.
+notify.one_hotkey = 1 sneltoets aktief.
+notify.hotkeys = {count} sneltoetse aktief.
+notify.save_failed = Kon nie die konfigurasie stoor nie
+notify.switch_failed = Kon nie die inset oorskakel nie
+notify.hotkeys_failed = Sommige sneltoetse kon nie geregistreer word nie
+notify.hotkeys_failed_detail = {keys} — waarskynlik in gebruik deur 'n ander toepassing.
+notify.monitor_missing = Monitor nie gekoppel nie
+notify.monitor_missing_detail = {monitor} is tans nie aan hierdie rekenaar gekoppel nie.
+notify.the_monitor = Die monitor
+notify.startup_failed = Kon nie "Begin saam met Windows" verander nie
+notify.startup_failed_detail = Die begininstelling kon nie in die register geskryf word nie.
+
+# ------------------------------------------------------------------------- switching
+switch.no_inputs = Geen insette is vir hierdie sneltoets gekies nie.
+switch.refused = {monitor} het nie die oorskakeling na {input} aanvaar nie. Maak seker dat DDC/CI in die monitor se skermkieslys aangeskakel is.
+input.unknown = Inset 0x{code}
+input.none = (geen insette)
+input.switch_to = Skakel oor na {input}
+input.toggle = Wissel {first} ⇄ {second}
+input.cycle = Blaai deur {inputs}
+monitor.built_in = Ingeboude skerm
+
+# ------------------------------------------------------------------------- main window
+main.configurations = Konfigurasies
+main.new = Nuut van huidige opstelling
+main.delete = Skrap konfigurasie
+main.version = Weergawe {version}
+main.name = Naam:
+main.hotkeys_on = Sneltoetse aan
+main.monitors = Monitors
+main.monitors_hint = Hierdie konfigurasie word gebruik wanneer hierdie monitors gekoppel is.
+main.detect = Bespeur insette
+main.add_connected = Voeg gekoppeldes by
+main.hotkeys = Sneltoetse
+main.hotkeys_hint = Skakel oor na een inset, wissel tussen twee, of blaai deur verskeie.
+main.add_hotkey = Voeg sneltoets by
+main.saved_automatically = Veranderinge word outomaties gestoor
+main.settings = Instellings
+
+# The configurations list and the status banner.
+profile.unnamed = Naamlose opstelling
+profile.new_name = Opstelling {number}
+profile.one_monitor = 1 monitor
+profile.monitors = {count} monitors
+profile.hotkeys_off = sneltoetse af
+status.no_external = Geen eksterne monitors is gekoppel nie. Koppel jou monitors en 'n konfigurasie sal outomaties vir hulle geskep word.
+status.no_configurations = Nog geen konfigurasies nie. Kies "Nuut van huidige opstelling" om een te skep vir die monitors wat nou gekoppel is.
+status.present = ({present} van {count} monitors teenwoordig)
+status.active = Nou gekoppel {present}. Sneltoetse is aktief.
+status.hotkeys_off = Nou gekoppel {present}. Skakel sneltoetse aan om hulle te gebruik.
+status.not_connected = Nie nou gekoppel nie. Insette kan net bespeur en getoets word terwyl hierdie opstelling gekoppel is.
+
+# Creating and deleting configurations.
+profile.no_external = Geen eksterne monitors gekoppel nie
+profile.no_external_detail = Koppel die monitors vir hierdie opstelling en probeer dan weer. Die skootrekenaar se eie skerm tel nie.
+profile.duplicate = Nog 'n konfigurasie skep?
+profile.duplicate_detail = "{name}" dek reeds presies hierdie monitors. Wanneer twee konfigurasies pas, word die eerste een in die lys gebruik.
+profile.delete = Skrap "{name}"?
+profile.delete_one_hotkey = Die konfigurasie en sy sneltoets sal verwyder word.
+profile.delete_hotkeys = Die konfigurasie en sy {count} sneltoetse sal verwyder word.
+profile.delete_active_note = Hierdie opstelling is nou gekoppel, dus sal 'n nuwe, leë konfigurasie daarvoor geskep word wanneer jy hierdie venster toemaak.
+
+# The Monitors card.
+monitors.not_detected = Insette nog nie bespeur nie
+monitors.connect_to_detect = Koppel hierdie monitor om sy insette te bespeur
+monitors.nothing_to_add = Niks om by te voeg nie
+monitors.nothing_to_add_detail = Al die gekoppelde monitors is reeds in hierdie konfigurasie.
+monitors.remove = Verwyder {monitor}?
+monitors.remove_detail = Konfigurasies word aan hul monitors herken, dus verander dit watter opstellings "{name}" pas.
+monitors.remove_one_hotkey = Konfigurasies word aan hul monitors herken, dus verander dit watter opstellings "{name}" pas. Sy sneltoets sal ook verwyder word.
+monitors.remove_hotkeys = Konfigurasies word aan hul monitors herken, dus verander dit watter opstellings "{name}" pas. Sy {count} sneltoetse sal ook verwyder word.
+monitors.none_connected = Geen van hierdie konfigurasie se monitors is gekoppel nie.
+monitors.reading = Lees tans monitors oor DDC/CI…
+monitors.some_failed = Sommige monitors het nie hul insette gerapporteer nie. Maak seker DDC/CI is in die monitor se kieslys aangeskakel.
+monitors.detected = Insette bespeur.
+
+# The Hotkeys card.
+hotkeys.empty = Nog geen sneltoetse nie. Voeg een by om 'n monitor se inset met die sleutelbord oor te skakel.
+hotkeys.removed_monitor = (verwyderde monitor)
+hotkeys.no_monitors = Geen monitors in hierdie konfigurasie nie
+hotkeys.no_monitors_detail = Koppel 'n monitor en gebruik "Voeg gekoppeldes by" voordat jy 'n sneltoets byvoeg.
+hotkeys.remove = Verwyder {hotkey}?
+hotkeys.remove_detail = Die sneltoets vir {monitor} ({action}) sal verwyder word.
+hotkeys.not_connected = Daardie monitor is nie gekoppel nie.
+hotkeys.testing = Toets tans {hotkey}…
+
+# ------------------------------------------------------------------------- hotkey editor
+editor.add = Voeg sneltoets by
+editor.edit = Wysig sneltoets
+editor.monitor = Monitor
+editor.key_combination = Sleutelkombinasie
+editor.inputs = Insette
+editor.inputs_hint = Merk een inset om daarna oor te skakel, twee om tussen hulle te wissel, of meer om in die getoonde volgorde deur hulle te blaai.
+editor.other_code = Ander insetkode (heks)
+editor.common_inputs = (insette nie bespeur nie; algemene insette gelys)
+editor.listening = Druk nou die sleutels…
+editor.idle = Klik hier om 'n sleutelkombinasie op te neem
+editor.hint_listening = Luister — druk nou die sleutels. Win-kortpaaie word vasgevang terwyl hierdie blokkie gekies is. Backspace maak dit skoon.
+editor.hint_idle = Klik op die blokkie en druk die sleutels. Gebruik Ctrl, Alt of Win met 'n sleutel (of F13–F24). Backspace maak dit skoon.
+editor.bad_code = Nie 'n geldige insetkode nie
+editor.bad_code_detail = Voer 'n heksadesimale kode tussen 01 en FF in, byvoorbeeld 1B.
+editor.no_monitor = Kies 'n monitor
+editor.no_monitor_detail = Kies die monitor wat hierdie sneltoets moet oorskakel.
+editor.no_keys = Nog geen sleutelkombinasie nie
+editor.no_keys_detail = Klik op die sleutelkombinasie-blokkie en druk die sleutels wat jy wil gebruik.
+editor.bad_keys = Daardie kombinasie kan nie gebruik word nie
+editor.bad_keys_detail = Gebruik Ctrl, Alt of Win met die sleutel (of een van F13–F24).
+editor.no_inputs = Hierdie sneltoets is nie klaar nie
+editor.no_inputs_detail = Merk ten minste een inset.
+editor.in_use = {hotkey} is reeds in gebruik
+editor.in_use_here = 'n Ander sneltoets in hierdie konfigurasie gebruik dit. Kies 'n ander kombinasie, of verander die ander sneltoets.
+editor.in_use_elsewhere = Windows of 'n ander toepassing gebruik reeds hierdie kombinasie, dus kan InputSwitch nie. Kies 'n ander een.
+editor.windows_shortcut = {hotkey} is 'n Windows-kortpad
+editor.windows_shortcut_detail = Windows gebruik {hotkey} vir {what}, dus sal dit waarskynlik nooit by InputSwitch uitkom nie.
+editor.use_anyway = Gebruik in elk geval
+
+# ------------------------------------------------------------------------- settings
+settings.title = Instellings
+settings.language = Taal
+settings.theme = Tema
+settings.theme_system = Gebruik die Windows-instelling
+settings.theme_light = Lig
+settings.theme_dark = Donker
+settings.start_with_windows = Begin saam met Windows
+settings.notify = Laat weet my wanneer die opstelling verander
+settings.notify_hint = Probleme en nuwe opstellings word altyd gewys.
+
+# ------------------------------------------------------------------------- Windows shortcuts
+# What Windows uses a shortcut for, as in "Windows gebruik Win + E vir {what}".
+shortcut.quick_settings = Vinnige Instellings
+shortcut.notification_area = die kennisgewingarea
+shortcut.copilot = Copilot
+shortcut.show_desktop = om die werkskerm te wys
+shortcut.file_explorer = Lêerverkenner
+shortcut.game_bar = die Speletjiebalk
+shortcut.voice_typing = stemtik
+shortcut.settings = Instellings
+shortcut.cast = Uitsaai
+shortcut.lock = om die rekenaar te sluit
+shortcut.minimise_all = om alle vensters te minimaliseer
+shortcut.notifications = kennisgewings
+shortcut.rotation_lock = rotasieslot
+shortcut.projection = projeksie
+shortcut.search = soek
+shortcut.run = Hardloop
+shortcut.taskbar_apps = taakbalktoepassings
+shortcut.accessibility = Toeganklikheidsinstellings
+shortcut.clipboard = knipbordgeskiedenis
+shortcut.widgets = Legstukke
+shortcut.quick_link = die Vinnige Skakel-kieslys
+shortcut.snap_layouts = Snap-uitlegte
+shortcut.task_view = Taakaansig
+shortcut.keyboard_layout = om die sleutelborduitleg te wissel
+shortcut.close_magnifier = om die Vergrootglas toe te maak
+shortcut.snap_window = om vensters vas te heg
+shortcut.maximise_window = om vensters te maksimaliseer
+shortcut.minimise_window = om vensters te minimaliseer
+shortcut.minimise_others = om ander vensters te minimaliseer
+shortcut.system_settings = Stelselinstellings
+shortcut.screenshot = skermkiekies
+shortcut.magnifier = die Vergrootglas
+shortcut.peek = om na die werkskerm te loer
+shortcut.emoji = die emoji-paneel
+shortcut.snipping_tool = die Knipselgereedskap
+shortcut.restore_minimised = om geminimaliseerde vensters te herstel
+shortcut.move_window = om vensters na 'n ander monitor te skuif
+shortcut.stretch_window = om vensters te rek
+shortcut.restore_window = om vensters te herstel
+shortcut.new_desktop = nuwe virtuele werkskerms
+shortcut.close_desktop = om virtuele werkskerms toe te maak
+shortcut.switch_desktop = om tussen virtuele werkskerms te wissel
+shortcut.narrator = Verteller
+shortcut.narrator_settings = Verteller-instellings
+shortcut.on_screen_keyboard = die skermsleutelbord
+shortcut.colour_filters = kleurfilters
+shortcut.magnifier_settings = Vergrootglas-instellings
+shortcut.speech = spraakherkenning
+shortcut.find_computers = om rekenaars te vind
+shortcut.quick_assist = Vinnige Bystand
+shortcut.restart_graphics = om die grafiese drywer te herbegin
+shortcut.date_time = die datum en tyd
+shortcut.recording = Speletjiebalk-opnames
+shortcut.hdr = HDR
+shortcut.mute = om die mikrofoon te demp
+shortcut.game_bar_screenshot = Speletjiebalk-skermkiekies

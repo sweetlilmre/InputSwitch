@@ -8,6 +8,7 @@
 
 use crate::ffi::*;
 use crate::hotkey::{self, Hotkey};
+use crate::i18n::t;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
@@ -16,10 +17,6 @@ const WM_WIN_CHANGED: u32 = WM_APP + 10;
 const SUBCLASS_ID: usize = 1;
 /// GetAncestor's "the parent window".
 const GA_PARENT: u32 = 1;
-const PLACEHOLDER_LISTENING: &str = "Press the keys now…";
-const PLACEHOLDER_IDLE: &str = "Click here to record a key combination";
-const HINT_LISTENING: &str = "Listening — press the keys now. Win shortcuts are captured while this box is selected. Backspace clears it.";
-const HINT_IDLE: &str = "Click the box and press the keys. Use Ctrl, Alt or Win with a key (or F13–F24). Backspace clears it.";
 
 /// The box, or 0 when there isn't one. The hook needs it, so it's shared rather than per window.
 static BOX: AtomicIsize = AtomicIsize::new(0);
@@ -134,7 +131,7 @@ fn set_listening(h: HWND, on: bool) {
     LISTENING.store(on, Ordering::Relaxed);
     let hint = HINT.load(Ordering::Relaxed);
     if hint != 0 {
-        crate::ui::set_text(hint, if on { HINT_LISTENING } else { HINT_IDLE });
+        crate::ui::set_text(hint, t(if on { "editor.hint_listening" } else { "editor.hint_idle" }));
     }
     show(h, None);
     unsafe {
@@ -153,9 +150,9 @@ fn show(h: HWND, partial: Option<u8>) {
             if !v.is_empty() {
                 v.display()
             } else if LISTENING.load(Ordering::Relaxed) {
-                PLACEHOLDER_LISTENING.to_string()
+                t("editor.listening").to_string()
             } else {
-                PLACEHOLDER_IDLE.to_string()
+                t("editor.idle").to_string()
             }
         }
     };

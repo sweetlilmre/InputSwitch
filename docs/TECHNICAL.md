@@ -12,6 +12,7 @@ This is the developer and power-user companion to the [user guide](../README.md)
 - [Project layout](#project-layout)
 - [How it works](#how-it-works)
 - [The settings file](#the-settings-file)
+- [Translations](#translations)
 - [Command-line options](#command-line-options)
 - [Input codes reference](#input-codes-reference)
 - [Developer tool: window screenshots](#developer-tool-window-screenshots)
@@ -110,6 +111,8 @@ Apart from the release files, nothing is uploaded; everything is in the run log.
 | `src/hotkey.rs`, `src/reserved.rs` | Hotkeys (key and modifiers, and their names in the file), and the Windows shortcuts warned about when saving one. |
 | `src/monitors/` | Enumeration (CCD API) and identities (`edid.rs`), input codes and capabilities parsing (`inputs.rs`), DDC/CI (`ddc.rs`), and the switch, toggle and cycle logic (`switch.rs`). |
 | `src/main_window/` | The main window: layout, the configurations list, and the Monitors and Hotkeys cards. |
+| `src/settings_window.rs` | The Settings dialog: language, theme, Start with Windows, notifications. |
+| `src/i18n.rs`, `lang/*.txt` | Translations: the language files (built into the exe) and looking text up in them. |
 | `src/hotkey_editor/` | The hotkey editor, its key-capture box (Win key included, via a short-lived keyboard hook) and its inputs list. |
 | `src/ui/` | A small Win32 UI toolkit with a Fluent look: the theme (light and dark, accent colour), fonts, drawing, owner-drawn buttons, check boxes, switches and drop-downs, text boxes, themed dialogs, a scrolling card panel, and a mailbox for messages from background threads. |
 | `src/ffi/` | Hand-written Windows API declarations, only what's used, grouped by area. |
@@ -205,15 +208,36 @@ Stored at `%APPDATA%\InputSwitch\config.json`, or in the folder named by the `IN
     }
   ],
   "ShowNotifications": true,
-  "Theme": "System"
+  "Theme": "System",
+  "Language": "en"
 }
 ```
 
-- `Theme` is `System` (follow Windows, the default when it's missing), `Light` or `Dark`. The **Dark mode** switch sets `Light` or `Dark`.
+- `Theme` is `System` (follow Windows, the default when it's missing), `Light` or `Dark`, as chosen in **Settings**.
+- `Language` is a language code from `src/i18n.rs` (`en`, `af`). It's `en` when missing, and an unknown code shows English.
 - `SupportedInputs` and `Inputs` are VCP 0x60 codes in decimal (15 = `0x0F` DisplayPort 1, 17 = `0x11` HDMI 1).
 - `Key` is a .NET `Keys` name, as older (C#) versions of InputSwitch wrote it, so their settings files load unchanged. `Modifiers` is any combination of `Alt`, `Control`, `Shift` and `Win`.
 
 **Start with Windows** writes a `InputSwitch` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`. No admin rights are needed.
+
+## Translations
+
+All the text the app shows comes from language files in `lang/`: plain UTF-8 text, one `key = text` line each, so translating needs nothing but a text editor. They're built into the exe with `include_str!`, so nothing extra ships.
+
+```
+# Comments start with #.
+tray.exit = Exit
+notify.hotkeys = {count} hotkeys active.
+```
+
+- Keys are grouped by where the text appears (`tray.`, `main.`, `editor.`, `settings.` and so on).
+- `{name}` placeholders are filled in by the app; a translation can move them, but must keep them all. `\n` is a line break.
+- English (`en.txt`) is the reference. A key missing from another language falls back to English, and a key missing from English shows as the key itself.
+- `i18n::t("key")` looks text up; `i18n::tf("key", &[("name", &value)])` fills in placeholders. The language can change while the app runs: the main window and Settings dialog redraw their text straight away.
+
+**To add a language,** copy `en.txt` to `<code>.txt`, translate it, and add a line to `LANGUAGES` in `src/i18n.rs` (its code and its name in that language). `cargo test` then checks it: every key must exist in English with the same placeholders, every English key must be translated, and every key the code uses must be in `en.txt`.
+
+What isn't translated: the settings file's keys and values, the `--diagnose` report (it's for support), key names on key caps (Ctrl, Alt, Shift, Win), and input names such as HDMI 1.
 
 ## Command-line options
 

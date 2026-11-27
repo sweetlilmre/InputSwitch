@@ -6,6 +6,7 @@
 
 use crate::config::{self, AppConfig};
 use crate::ffi::*;
+use crate::i18n::{self, t, tf};
 use crate::monitors::{self, MonitorInfo};
 use crate::ui::{self, dialog, IconSize, Mailbox, Slot, WM_MAIL};
 use crate::{main_window, matcher, sys};
@@ -92,11 +93,11 @@ pub fn run(open_main_window: bool) -> i32 {
 
     let (config, error) = config::load();
     if let Some(e) = error {
-        dialog::alert(0, dialog::Icon::Warning, "Your settings couldn't be read",
-            &format!("{e}\n\nInputSwitch will start with fresh settings."));
+        dialog::alert(0, dialog::Icon::Warning, t("startup.unreadable_settings"), &tf("startup.unreadable_settings_detail", &[("error", &e)]));
     }
     let first_run = config.profiles.is_empty();
     ui::theme::set_dark(config.theme.dark());
+    i18n::set_language(&config.language);
 
     TRAY.with(|t| t.set(Tray {
         hwnd, config, connected: Vec::new(), active: None, capturing: false,
@@ -259,17 +260,16 @@ impl Tray {
             if interactive {
                 self.open_main_window(Some(id));
             } else {
-                self.notify("New display setup detected",
-                    &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, OnClick::Open(Some(id)));
+                self.notify(t("notify.new_setup"), &tf("notify.new_setup_detail", &[("name", &name), ("monitors", &what)]), NIIF_INFO, OnClick::Open(Some(id)));
             }
         } else if changed && !main_window::is_open() {
             if let Some(p) = self.active_profile() {
                 let text = match (p.enabled, self.hotkeys.len()) {
-                    (false, _) => "This configuration is disabled. Click to configure.".into(),
-                    (true, 1) => "1 hotkey active.".into(),
-                    (true, n) => format!("{n} hotkeys active."),
+                    (false, _) => t("notify.setup_disabled").into(),
+                    (true, 1) => t("notify.one_hotkey").into(),
+                    (true, n) => tf("notify.hotkeys", &[("count", &n)]),
                 };
-                let (title, id) = (format!("Display setup: {}", p.name), p.id.clone());
+                let (title, id) = (tf("notify.setup", &[("name", &p.name)]), p.id.clone());
                 self.notify(&title, &text, NIIF_NONE, OnClick::Open(Some(id)));
             }
         } else if interactive && self.active.is_none() {
@@ -297,16 +297,17 @@ impl Tray {
 
     fn save(&mut self) {
         if let Err(e) = config::save(&self.config) {
-            self.notify("Could not save configuration", &e.to_string(), NIIF_ERROR, OnClick::Nothing);
+            self.notify(t("notify.save_failed"), &e.to_string(), NIIF_ERROR, OnClick::Nothing);
         }
     }
 
     fn on_event(&mut self, ev: Event) {
         match ev {
-            Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, OnClick::Nothing),
+            Event::SwitchFailed(msg) => self.notify(t("notify.switch_failed"), &msg, NIIF_WARNING, OnClick::Nothing),
             Event::ConfigChanged(cfg) => {
                 self.config = cfg;
                 ui::theme::set_dark(self.config.theme.dark());
+                i18n::set_language(&self.config.language);
                 self.save();
                 // Configurations may have been added, deleted or changed: keep the same one active
                 // if it still fits.
@@ -362,8 +363,7 @@ impl Tray {
         let news = failures != self.last_failures;
         self.last_failures = failures.clone();
         if report && news && !failures.is_empty() {
-            self.notify("Some hotkeys could not be registered",
-                &format!("{failures} — probably in use by another application."), NIIF_WARNING, OnClick::Open(Some(target)));
+            self.notify(t("notify.hotkeys_failed"), &tf("notify.hotkeys_failed_detail", &[("keys", &failures)]), NIIF_WARNING, OnClick::Open(Some(target)));
         }
     }
 
@@ -378,8 +378,8 @@ impl Tray {
         let Some(b) = p.bindings.get(index) else { return };
         let monitor = self.connected.iter().find(|m| m.id.eq_ignore_ascii_case(&b.monitor_id)).cloned();
         let Some(monitor) = monitor else {
-            let name = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "The monitor".into());
-            self.notify("Monitor not connected", &format!("{name} is not currently connected to this computer."), NIIF_WARNING, OnClick::Nothing);
+            let name = p.monitor(&b.monitor_id).map_or_else(|| t("notify.the_monitor").to_string(), |m| m.name.clone());
+            self.notify(t("notify.monitor_missing"), &tf("notify.monitor_missing_detail", &[("monitor", &name)]), NIIF_WARNING, OnClick::Nothing);
             return;
         };
         let inputs = b.inputs.clone();
@@ -438,8 +438,8 @@ impl Tray {
 
     fn tip(&self) -> String {
         match self.active_profile() {
-            None => "InputSwitch — no configuration".into(),
-            Some(p) => format!("InputSwitch — {}{}", p.name, if p.enabled { "" } else { " (disabled)" }),
+            None => t("tray.tip_none").into(),
+            Some(p) => tf(if p.enabled { "tray.tip" } else { "tray.tip_disabled" }, &[("name", &p.name)]),
         }
     }
 
@@ -482,9 +482,9 @@ impl Tray {
         let active = self.active_profile();
 
         let header = match active {
-            None if matcher::fingerprint(&self.connected).is_empty() => "No external monitors".to_string(),
-            None => "Unknown display setup".to_string(),
-            Some(p) => format!("Setup: {}{}", p.name, if p.enabled { "" } else { " (disabled)" }),
+            None if matcher::fingerprint(&self.connected).is_empty() => t("tray.no_external").to_string(),
+            None => t("tray.unknown_setup").to_string(),
+            Some(p) => tf(if p.enabled { "tray.setup" } else { "tray.setup_disabled" }, &[("name", &p.name)]),
         };
         add(menu, MF_STRING | MF_GRAYED, &header, None);
 
@@ -510,20 +510,20 @@ impl Tray {
                 for code in inputs {
                     add(sub, MF_STRING, &monitors::long_name(code), Some(MenuAction::SetInput(m.clone(), code)));
                 }
-                unsafe { AppendMenuW(menu, MF_POPUP, sub as usize, wide(&format!("Switch {name} to")).as_ptr()) };
+                unsafe { AppendMenuW(menu, MF_POPUP, sub as usize, wide(&tf("tray.switch_monitor_to", &[("monitor", &name)])).as_ptr()) };
             }
         }
 
         add(menu, MF_SEPARATOR, "", None);
-        let configure = add(menu, MF_STRING, "Configure…", Some(MenuAction::Configure));
+        let configure = add(menu, MF_STRING, t("tray.configure"), Some(MenuAction::Configure));
         unsafe { SetMenuDefaultItem(menu, configure as u32, 0) };
-        add(menu, MF_STRING, "Re-detect displays", Some(MenuAction::Redetect));
+        add(menu, MF_STRING, t("tray.redetect"), Some(MenuAction::Redetect));
         let startup = if sys::startup_enabled() { MF_CHECKED } else { 0 };
-        add(menu, MF_STRING | startup, "Start with Windows", Some(MenuAction::ToggleStartup));
-        add(menu, MF_STRING, "Open config folder", Some(MenuAction::OpenFolder));
+        add(menu, MF_STRING | startup, t("tray.start_with_windows"), Some(MenuAction::ToggleStartup));
+        add(menu, MF_STRING, t("tray.open_folder"), Some(MenuAction::OpenFolder));
         add(menu, MF_SEPARATOR, "", None);
-        add(menu, MF_STRING | MF_GRAYED, &format!("InputSwitch {}", sys::VERSION), None);
-        add(menu, MF_STRING, "Exit", Some(MenuAction::Exit));
+        add(menu, MF_STRING | MF_GRAYED, &tf("tray.version", &[("version", &sys::VERSION)]), None);
+        add(menu, MF_STRING, t("tray.exit"), Some(MenuAction::Exit));
         (menu, actions)
     }
 
@@ -546,9 +546,8 @@ impl Tray {
             MenuAction::Redetect => self.evaluate(false),
             MenuAction::ToggleStartup => {
                 if !sys::set_startup(!sys::startup_enabled()) {
-                    self.notify("Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.", NIIF_WARNING, OnClick::Nothing);
+                    self.notify(t("notify.startup_failed"), t("notify.startup_failed_detail"), NIIF_WARNING, OnClick::Nothing);
                 }
-                main_window::startup_changed();
             }
             MenuAction::OpenFolder => {
                 let dir = config::dir();
@@ -562,5 +561,5 @@ impl Tray {
 
 /// The monitor's name, or "2 monitors".
 fn describe_monitors(p: &config::Profile) -> String {
-    if p.monitors.len() == 1 { p.monitors[0].name.clone() } else { format!("{} monitors", p.monitors.len()) }
+    if p.monitors.len() == 1 { p.monitors[0].name.clone() } else { tf("notify.monitor_count", &[("count", &p.monitors.len())]) }
 }

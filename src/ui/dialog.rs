@@ -25,14 +25,26 @@ pub enum Icon {
     Warning,
 }
 
+/// The OK and Cancel buttons' text, in the app's language.
+static LABELS: std::sync::RwLock<(&str, &str)> = std::sync::RwLock::new(("OK", "Cancel"));
+
+/// Sets the OK and Cancel buttons' text (when the app's language changes).
+pub fn set_button_labels(ok: &'static str, cancel: &'static str) {
+    *LABELS.write().unwrap_or_else(|e| e.into_inner()) = (ok, cancel);
+}
+
+fn labels() -> (&'static str, &'static str) {
+    *LABELS.read().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A message with an OK button.
 pub fn alert(owner: HWND, icon: Icon, heading: &str, message: &str) {
-    show(owner, icon, heading, message, &["OK"]);
+    show(owner, icon, heading, message, &[labels().0]);
 }
 
 /// A confirmation with a warning icon: `action` (e.g. "Delete") or Cancel. True for `action`.
 pub fn confirm(owner: HWND, heading: &str, message: &str, action: &str) -> bool {
-    show(owner, Icon::Warning, heading, message, &[action, "Cancel"]) == 0
+    show(owner, Icon::Warning, heading, message, &[action, labels().1]) == 0
 }
 
 struct Dialog {

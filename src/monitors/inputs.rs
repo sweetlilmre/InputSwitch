@@ -1,6 +1,8 @@
 //! Monitor inputs: their MCCS codes (VCP 0x60 values) and names, and the list of inputs a
 //! monitor reports in its capabilities string.
 
+use crate::i18n::{t, tf};
+
 const INPUT_NAMES: &[(u8, &str)] = &[
     (0x01, "VGA 1"), (0x02, "VGA 2"), (0x03, "DVI 1"), (0x04, "DVI 2"), (0x05, "Composite 1"), (0x06, "Composite 2"),
     (0x07, "S-Video 1"), (0x08, "S-Video 2"), (0x09, "Tuner 1"), (0x0A, "Tuner 2"), (0x0B, "Tuner 3"),
@@ -24,17 +26,17 @@ pub fn short_name(code: u8) -> String {
 
 /// "HDMI 1 (0x11)", or "Input 0x7E".
 pub fn long_name(code: u8) -> String {
-    name(code).map_or_else(|| format!("Input 0x{code:02X}"), |n| format!("{n} (0x{code:02X})"))
+    name(code).map_or_else(|| tf("input.unknown", &[("code", &format!("{code:02X}"))]), |n| format!("{n} (0x{code:02X})"))
 }
 
 /// "Switch to HDMI 1" / "Toggle DisplayPort 1 ⇄ HDMI 1" / "Cycle A → B → C".
 pub fn describe_action(inputs: &[u8]) -> String {
     let names: Vec<String> = inputs.iter().map(|&c| short_name(c)).collect();
     match names.as_slice() {
-        [] => "(no inputs)".into(),
-        [one] => format!("Switch to {one}"),
-        [a, b] => format!("Toggle {a} \u{21c4} {b}"),
-        _ => format!("Cycle {}", names.join(" \u{2192} ")),
+        [] => t("input.none").into(),
+        [one] => tf("input.switch_to", &[("input", one)]),
+        [a, b] => tf("input.toggle", &[("first", a), ("second", b)]),
+        _ => tf("input.cycle", &[("inputs", &names.join(" \u{2192} "))]),
     }
 }
 

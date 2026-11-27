@@ -2,6 +2,7 @@
 //! the status banner, the two cards and the name box's frame. Sizes are at 96 DPI.
 
 use super::*;
+use crate::i18n::{t, tf};
 use crate::ui::draw::{self, rect, RectExt};
 use crate::ui::lists;
 use crate::ui::text_box::TextBox;
@@ -18,6 +19,11 @@ const EX_STYLE: u32 = WS_EX_CONTROLPARENT;
 
 // Controls.
 const BUTTON_H: i32 = 32;
+/// A button's width beyond its text: padding, plus an icon and the gap after it.
+const BUTTON_EXTRA: i32 = 32;
+const ICON_BUTTON_EXTRA: i32 = BUTTON_EXTRA + 16 + 8;
+/// A check box's width beyond its label: the box and the gap after it.
+const CHECK_EXTRA: i32 = 18 + 8 + 4;
 const CHECK_H: i32 = 24;
 const LABEL_H: i32 = 20;
 /// A two-line item in the configurations list.
@@ -96,9 +102,7 @@ pub(super) struct Controls {
     pub hotkeys: HWND,
     pub activity: HWND,
     pub saved_note: HWND,
-    pub startup: HWND,
-    pub notify: HWND,
-    pub dark: HWND,
+    pub settings: HWND,
     pub close: HWND,
 }
 
@@ -115,8 +119,7 @@ impl Controls {
             (self.name_label, f.normal), (self.status, f.normal), (self.enabled, f.normal),
             (self.monitors_label, f.section), (self.monitors_hint, f.normal), (self.detect, f.normal), (self.add_connected, f.normal),
             (self.hotkeys_label, f.section), (self.hotkeys_hint, f.normal), (self.add_hotkey, f.normal),
-            (self.activity, f.small), (self.saved_note, f.small), (self.startup, f.normal), (self.notify, f.normal), (self.dark, f.normal),
-            (self.close, f.normal),
+            (self.activity, f.small), (self.saved_note, f.small), (self.settings, f.normal), (self.close, f.normal),
         ];
         for (h, font) in fonts {
             ui::set_font(h, font);
@@ -126,6 +129,23 @@ impl Controls {
         ui::card_panel::set_fonts(self.monitors, f);
         ui::card_panel::set_fonts(self.hotkeys, f);
     }
+
+    /// Gives every control its text in the current language (on creation, and when the
+    /// language changes).
+    pub fn set_texts(&self) {
+        let texts = [
+            (self.configs_label, t("main.configurations")), (self.new, t("main.new")), (self.delete, t("main.delete")),
+            (self.name_label, t("main.name")), (self.enabled, t("main.hotkeys_on")),
+            (self.monitors_label, t("main.monitors")), (self.monitors_hint, t("main.monitors_hint")),
+            (self.detect, t("main.detect")), (self.add_connected, t("main.add_connected")),
+            (self.hotkeys_label, t("main.hotkeys")), (self.hotkeys_hint, t("main.hotkeys_hint")), (self.add_hotkey, t("main.add_hotkey")),
+            (self.saved_note, t("main.saved_automatically")), (self.settings, t("main.settings")), (self.close, t("common.close")),
+        ];
+        for (h, text) in texts {
+            ui::set_text(h, text);
+        }
+        ui::set_text(self.version, &tf("main.version", &[("version", &sys::display_version())]));
+    }
 }
 
 /// Creates the controls in the order they're laid out (left to right, top to bottom), which is
@@ -134,9 +154,9 @@ pub(super) fn create_controls(h: HWND, f: &Rc<Fonts>) -> Controls {
     use Surface::{Card, Layer, Window};
     let banner = Surface::InfoBar(Severity::Informational);
     let n = f.normal;
-    let label = |text: &str, surface, secondary| ui::label(h, text, n, surface, secondary);
+    let label = |surface, secondary| ui::label(h, "", n, surface, secondary);
     let c = Controls {
-        configs_label: label("Configurations", Window, false),
+        configs_label: label(Window, false),
         // Two-line items (name, then status), drawn by draw_profile.
         profiles: {
             let list = ui::child(h, "LISTBOX", "", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 0, ID_PROFILES, n);
@@ -144,39 +164,38 @@ pub(super) fn create_controls(h: HWND, f: &Rc<Fonts>) -> Controls {
             theme::apply_control(list, theme::ControlKind::ListBox);
             list
         },
-        new: widgets::button(h, "New from current setup", ID_NEW, Some(widgets::ICON_ADD), f, Window),
-        delete: widgets::button(h, "Delete configuration", ID_DELETE, Some(widgets::ICON_DELETE), f, Window),
-        version: label(&format!("Version {}", sys::display_version()), Window, true),
-        name_label: label("Name:", Layer, true),
+        new: widgets::button(h, "", ID_NEW, Some(widgets::ICON_ADD), f, Window),
+        delete: widgets::button(h, "", ID_DELETE, Some(widgets::ICON_DELETE), f, Window),
+        version: label(Window, true),
+        name_label: label(Layer, true),
         name: TextBox::create(h, ID_NAME, f.title, f),
-        status: label("", banner, false),
-        enabled: widgets::checkbox(h, "Hotkeys on", ID_ENABLED, f, banner),
-        monitors_label: label("Monitors", Card, false),
-        monitors_hint: label("This configuration is used whenever these monitors are connected.", Card, true),
-        detect: widgets::button(h, "Detect inputs", ID_DETECT, Some(widgets::ICON_REFRESH), f, Card),
-        add_connected: widgets::button(h, "Add connected", ID_ADD_CONNECTED, Some(widgets::ICON_ADD), f, Card),
+        status: label(banner, false),
+        enabled: widgets::checkbox(h, "", ID_ENABLED, f, banner),
+        monitors_label: label(Card, false),
+        monitors_hint: label(Card, true),
+        detect: widgets::button(h, "", ID_DETECT, Some(widgets::ICON_REFRESH), f, Card),
+        add_connected: widgets::button(h, "", ID_ADD_CONNECTED, Some(widgets::ICON_ADD), f, Card),
         monitors: monitor_cards::create(h, ID_MONITORS, f),
-        hotkeys_label: label("Hotkeys", Card, false),
-        hotkeys_hint: label("Switch to one input, toggle between two, or cycle through several.", Card, true),
-        add_hotkey: widgets::accent_button(h, "Add hotkey", ID_ADD_HOTKEY, Some(widgets::ICON_ADD), f, Card),
+        hotkeys_label: label(Card, false),
+        hotkeys_hint: label(Card, true),
+        add_hotkey: widgets::accent_button(h, "", ID_ADD_HOTKEY, Some(widgets::ICON_ADD), f, Card),
         hotkeys: hotkey_cards::create(h, ID_HOTKEYS, f),
-        activity: label("", Layer, true),
+        activity: label(Layer, true),
         saved_note: {
-            let note = ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, n);
+            let note = ui::child(h, "STATIC", "", SS_NOPREFIX | SS_RIGHT, 0, 0, n);
             theme::set_surface(note, Layer, true);
             note
         },
-        startup: widgets::checkbox(h, "Start with Windows", ID_STARTUP, f, Layer),
-        notify: widgets::checkbox(h, "Notify when the setup changes", ID_NOTIFY, f, Layer),
-        dark: widgets::switch(h, "Dark mode", ID_DARK, f, Layer),
-        close: widgets::button(h, "Close", IDCANCEL, None, f, Layer),
+        settings: widgets::button(h, "", ID_SETTINGS, Some(widgets::ICON_SETTINGS), f, Layer),
+        close: widgets::button(h, "", IDCANCEL, None, f, Layer),
     };
     c.set_fonts(f);
+    c.set_texts();
     c
 }
 
 /// Areas painted behind the controls (in physical pixels).
-#[derive(Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub(super) struct Regions {
     layer: RECT,
     pub banner: RECT,
@@ -206,6 +225,7 @@ impl MainWindow {
         let regions = Regions { layer, banner, cards, name_frame };
         if regions != self.regions {
             self.regions = regions;
+            self.share_background();
             unsafe { RedrawWindow(self.hwnd, core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
         }
     }
@@ -226,7 +246,7 @@ impl MainWindow {
 
     /// The name box along the top, with its label. Returns the box's frame.
     fn layout_name(&self, left: i32, right: i32) -> RECT {
-        let label_w = 48;
+        let label_w = self.text_width(self.c.name_label, 0, 40);
         self.place(self.c.name_label, left, 25, label_w, LABEL_H);
         let frame = self.scaled_rect(left + label_w + 4, 12, right - left - label_w - 4, 44);
         self.c.name.place(frame, self.dpi);
@@ -235,7 +255,7 @@ impl MainWindow {
 
     /// The status banner: an icon and the status on the left, "Hotkeys on" on the right.
     fn layout_banner(&self, left: i32, right: i32) -> RECT {
-        let enabled_w = 130;
+        let enabled_w = self.text_width(self.c.enabled, CHECK_EXTRA, 130);
         let status_x = left + 16 + 28;
         self.place(self.c.status, status_x, BANNER_Y + 13, right - 16 - enabled_w - 4 - status_x, LABEL_H);
         self.place(self.c.enabled, right - 16 - enabled_w, BANNER_Y + (BANNER_H - CHECK_H) / 2, enabled_w, CHECK_H);
@@ -246,14 +266,12 @@ impl MainWindow {
     fn layout_footer(&self, left: i32, right: i32, h: i32) -> i32 {
         let c = &self.c;
         let bottom = h - 16 - BUTTON_H;
-        let note_w = 220;
+        let note_w = self.text_width(c.saved_note, 4, 0);
         self.place(c.activity, left, bottom - 28, right - left - note_w - 10, LABEL_H);
         self.place(c.saved_note, right - note_w, bottom - 28, note_w, LABEL_H);
-        let check_y = bottom + (BUTTON_H - CHECK_H) / 2;
-        for (check, x, check_w) in [(c.startup, 0, 160), (c.notify, 166, 230), (c.dark, 412, 130)] {
-            self.place(check, left + x, check_y, check_w, CHECK_H);
-        }
-        self.place(c.close, right - 100, bottom, 100, BUTTON_H);
+        self.place(c.settings, left, bottom, self.text_width(c.settings, ICON_BUTTON_EXTRA, 120), BUTTON_H);
+        let close_w = self.text_width(c.close, BUTTON_EXTRA, 100);
+        self.place(c.close, right - close_w, bottom, close_w, BUTTON_H);
         bottom
     }
 
@@ -285,12 +303,13 @@ impl MainWindow {
         };
 
         let monitors_h = card_height(c.monitors, top, end - top - gap - HOTKEYS_MIN).max(CARD_HEADER + 60);
-        header(top, c.monitors_label, c.monitors_hint, &[(c.detect, 140), (c.add_connected, 150)]);
+        let button_w = |b: HWND| self.text_width(b, ICON_BUTTON_EXTRA, 110);
+        header(top, c.monitors_label, c.monitors_hint, &[(c.detect, button_w(c.detect)), (c.add_connected, button_w(c.add_connected))]);
         self.place(c.monitors, cx, top + CARD_HEADER, cw, monitors_h - CARD_HEADER - CARD_PAD);
 
         let hy = top + monitors_h + gap;
         let hotkeys_h = card_height(c.hotkeys, hy, end - hy).max(CARD_HEADER + 50);
-        header(hy, c.hotkeys_label, c.hotkeys_hint, &[(c.add_hotkey, 130)]);
+        header(hy, c.hotkeys_label, c.hotkeys_hint, &[(c.add_hotkey, button_w(c.add_hotkey))]);
         self.place(c.hotkeys, cx, hy + CARD_HEADER, cw, hotkeys_h - CARD_HEADER - CARD_PAD);
 
         [self.scaled_rect(left, top, width, monitors_h), self.scaled_rect(left, hy, width, hotkeys_h)]
@@ -302,34 +321,24 @@ impl MainWindow {
         ui::place(control, s(x), s(y), s(w), s(h));
     }
 
+    /// How wide `control` needs to be for its text, at 96 DPI: the text, plus `extra` (padding,
+    /// a check box or an icon), and at least `min`. Translations can be longer than English.
+    fn text_width(&self, control: HWND, extra: i32, min: i32) -> i32 {
+        let font = unsafe { SendMessageW(control, WM_GETFONT, 0, 0) } as HFONT;
+        let text = draw::text_width(&ui::get_text(control), font) * 96 / self.dpi as i32;
+        (text + extra + 1).max(min)
+    }
+
     /// A rectangle given at 96 DPI, in pixels.
     fn scaled_rect(&self, x: i32, y: i32, w: i32, h: i32) -> RECT {
         let s = |v: i32| ui::scale(v, self.dpi);
         rect(s(x), s(y), s(w), s(h))
     }
 
-    /// Paints what's behind the controls: the content layer, the cards, the banner and the name box's frame.
-    pub(super) fn paint_background(&self, hdc: HDC) {
-        let p = theme::palette();
-        let g = &self.regions;
-        let s = |v| ui::scale(v, self.dpi);
-        draw::fill(hdc, draw::client_rect(self.hwnd), p.window);
-        // Only the layer's top-left corner is rounded: it runs past the window's other edges.
-        let radius = s(8);
-        let layer = RECT { right: g.layer.right + radius * 2, bottom: g.layer.bottom + radius * 2, ..g.layer };
-        draw::round_rect(hdc, layer, radius, p.layer, Some(p.stroke));
-        for card in g.cards {
-            draw::round_rect(hdc, card, radius, p.card, Some(p.stroke));
-        }
-        draw::round_rect(hdc, g.banner, s(6), theme::color_of(Surface::InfoBar(self.status)), None);
-        let (glyph, colour) = match self.status {
-            Severity::Success => (widgets::ICON_TICK, p.success_text),
-            Severity::Warning => (widgets::ICON_WARNING, p.caution_text),
-            Severity::Informational => (widgets::ICON_INFO, p.text2),
-        };
-        let icon = RECT { left: g.banner.left + s(16), right: g.banner.left + s(16 + 20), ..g.banner };
-        draw::glyph(hdc, glyph, icon, self.fonts.icon_16, colour, DT_VCENTER);
-        self.c.name.paint(hdc, g.name_frame, self.dpi);
+    /// Updates what the background is painted from (after the layout, the status or the fonts change).
+    pub(super) fn share_background(&self) {
+        let background = Background { regions: self.regions, status: self.status, dpi: self.dpi, fonts: self.fonts.clone(), name: self.c.name };
+        BACKGROUND.with(|b| *b.borrow_mut() = Some(background));
     }
 
     /// The name box's frame shows whether it has focus.
@@ -340,7 +349,6 @@ impl MainWindow {
 
     /// Re-applies the palette after Windows switches between light and dark (or the accent changes).
     pub(super) fn retheme(&mut self) {
-        widgets::set_checked(self.c.dark, theme::palette().dark);
         theme::apply_window(self.hwnd);
         ui::card_panel::retheme(self.c.monitors);
         ui::card_panel::retheme(self.c.hotkeys);
@@ -359,7 +367,58 @@ impl MainWindow {
         unsafe { SendMessageW(self.c.profiles, LB_SETITEMHEIGHT, 0, profile_item_height(dpi) as LPARAM) };
         ui::place_rect(self.hwnd, suggested);
         self.layout();
+        self.share_background(); // the new fonts, even if nothing moved
     }
+}
+
+// ------------------------------------------------------------------------------------------ background
+
+/// What the window's background is painted from. Kept apart from the window's state (like the
+/// list's fonts) so the window can repaint while that's lent out: while a dialog opened from it
+/// is showing, or a setting changed in one is being applied.
+pub(super) struct Background {
+    regions: Regions,
+    status: Severity,
+    dpi: u32,
+    fonts: Rc<Fonts>,
+    name: TextBox,
+}
+
+thread_local! {
+    static BACKGROUND: RefCell<Option<Background>> = const { RefCell::new(None) };
+}
+
+/// Forgets the background (the window is closing).
+pub(super) fn forget_background() {
+    BACKGROUND.with(|b| b.borrow_mut().take());
+}
+
+/// Paints what's behind the controls: the content layer, the cards, the banner and the name
+/// box's frame.
+pub(super) fn paint_background(hwnd: HWND, hdc: HDC) {
+    let p = theme::palette();
+    draw::fill(hdc, draw::client_rect(hwnd), p.window);
+    BACKGROUND.with(|b| {
+        let Some(b) = &*b.borrow() else { return };
+        let g = &b.regions;
+        let s = |v| ui::scale(v, b.dpi);
+        // Only the layer's top-left corner is rounded: it runs past the window's other edges.
+        let radius = s(8);
+        let layer = RECT { right: g.layer.right + radius * 2, bottom: g.layer.bottom + radius * 2, ..g.layer };
+        draw::round_rect(hdc, layer, radius, p.layer, Some(p.stroke));
+        for card in g.cards {
+            draw::round_rect(hdc, card, radius, p.card, Some(p.stroke));
+        }
+        draw::round_rect(hdc, g.banner, s(6), theme::color_of(Surface::InfoBar(b.status)), None);
+        let (glyph, colour) = match b.status {
+            Severity::Success => (widgets::ICON_TICK, p.success_text),
+            Severity::Warning => (widgets::ICON_WARNING, p.caution_text),
+            Severity::Informational => (widgets::ICON_INFO, p.text2),
+        };
+        let icon = RECT { left: g.banner.left + s(16), right: g.banner.left + s(16 + 20), ..g.banner };
+        draw::glyph(hdc, glyph, icon, b.fonts.icon_16, colour, DT_VCENTER);
+        b.name.paint(hdc, g.name_frame, b.dpi);
+    });
 }
 
 // ------------------------------------------------------------------------------------------ configurations list
@@ -387,7 +446,7 @@ pub(super) fn draw_profile(dis: &DRAWITEMSTRUCT) {
     let s = |v| ui::scale(v, fonts.dpi);
     let text = lists::lb_text(dis.hwndItem, dis.itemID as usize);
     let (title, subtitle) = text.split_once('\t').unwrap_or((&text, ""));
-    let connected = subtitle.starts_with(profiles::CONNECTED);
+    let connected = subtitle.starts_with(t("common.connected"));
 
     draw::fill(hdc, r, p.window);
     let item = r.inset(s(2), s(2));

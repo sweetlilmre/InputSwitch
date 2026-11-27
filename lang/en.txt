@@ -1,0 +1,241 @@
+# InputSwitch: English. This is the reference language: every other language file has the same
+# keys, and anything missing from one falls back to the text here.
+#
+# How to translate:
+# - Copy this file to <code>.txt (for example de.txt), translate the text after each "=", and
+#   add the language to LANGUAGES in src/i18n.rs.
+# - Keep {placeholders} as they are: the app fills them in. You can move them within the text.
+# - \n is a line break. Lines starting with # are comments.
+# - Keep the file UTF-8.
+# - Run "cargo test" to check the file: it reports missing keys and mistyped placeholders.
+
+# ------------------------------------------------------------------------- common
+common.ok = OK
+common.cancel = Cancel
+common.close = Close
+common.remove = Remove
+common.delete = Delete
+common.create = Create
+common.add = Add
+common.save = Save
+common.connected = Connected
+common.not_connected = Not connected
+common.none = (none)
+
+# ------------------------------------------------------------------------- start-up
+startup.already_running = InputSwitch is already running
+startup.already_running_detail = Look for its icon in the notification area. Click it to open the settings.
+startup.unreadable_settings = Your settings couldn't be read
+startup.unreadable_settings_detail = {error}\n\nInputSwitch will start with fresh settings.
+storage.left_as_is = {error}. The file was left as it is; changes won't be saved this session.
+storage.kept_as_bad = {error}. The unreadable file was kept as config.json.bad in {folder}.
+storage.not_saved = {error}. Changes won't be saved this session.
+storage.not_overwritten = The settings file couldn't be read when InputSwitch started, so it isn't overwritten. Restart InputSwitch to try again.
+
+# ------------------------------------------------------------------------- tray icon and menu
+tray.tip_none = InputSwitch — no configuration
+tray.tip = InputSwitch — {name}
+tray.tip_disabled = InputSwitch — {name} (disabled)
+tray.no_external = No external monitors
+tray.unknown_setup = Unknown display setup
+tray.setup = Setup: {name}
+tray.setup_disabled = Setup: {name} (disabled)
+tray.switch_monitor_to = Switch {monitor} to
+tray.configure = Configure…
+tray.redetect = Re-detect displays
+tray.start_with_windows = Start with Windows
+tray.open_folder = Open config folder
+tray.version = InputSwitch {version}
+tray.exit = Exit
+
+# ------------------------------------------------------------------------- notifications
+notify.new_setup = New display setup detected
+notify.new_setup_detail = Created "{name}" for {monitors}. Click to name it and assign hotkeys.
+notify.monitor_count = {count} monitors
+notify.setup = Display setup: {name}
+notify.setup_disabled = This configuration is disabled. Click to configure.
+notify.one_hotkey = 1 hotkey active.
+notify.hotkeys = {count} hotkeys active.
+notify.save_failed = Could not save configuration
+notify.switch_failed = Input switch failed
+notify.hotkeys_failed = Some hotkeys could not be registered
+notify.hotkeys_failed_detail = {keys} — probably in use by another application.
+notify.monitor_missing = Monitor not connected
+notify.monitor_missing_detail = {monitor} is not currently connected to this computer.
+notify.the_monitor = The monitor
+notify.startup_failed = Couldn't change Start with Windows
+notify.startup_failed_detail = The startup setting couldn't be written to the registry.
+
+# ------------------------------------------------------------------------- switching
+switch.no_inputs = No inputs are selected for this hotkey.
+switch.refused = {monitor} did not accept the switch to {input}. Check that DDC/CI is enabled in the monitor's on-screen menu.
+input.unknown = Input 0x{code}
+input.none = (no inputs)
+input.switch_to = Switch to {input}
+input.toggle = Toggle {first} ⇄ {second}
+input.cycle = Cycle {inputs}
+monitor.built_in = Built-in display
+
+# ------------------------------------------------------------------------- main window
+main.configurations = Configurations
+main.new = New from current setup
+main.delete = Delete configuration
+main.version = Version {version}
+main.name = Name:
+main.hotkeys_on = Hotkeys on
+main.monitors = Monitors
+main.monitors_hint = This configuration is used whenever these monitors are connected.
+main.detect = Detect inputs
+main.add_connected = Add connected
+main.hotkeys = Hotkeys
+main.hotkeys_hint = Switch to one input, toggle between two, or cycle through several.
+main.add_hotkey = Add hotkey
+main.saved_automatically = Changes are saved automatically
+main.settings = Settings
+
+# The configurations list and the status banner.
+profile.unnamed = Unnamed setup
+profile.new_name = Setup {number}
+profile.one_monitor = 1 monitor
+profile.monitors = {count} monitors
+profile.hotkeys_off = hotkeys off
+status.no_external = No external monitors are connected. Connect your monitors and a configuration will be created for them automatically.
+status.no_configurations = No configurations yet. Choose "New from current setup" to create one for the monitors connected now.
+status.present = ({present} of {count} monitors present)
+status.active = Connected now {present}. Hotkeys are active.
+status.hotkeys_off = Connected now {present}. Turn hotkeys on to use them.
+status.not_connected = Not connected now. Inputs can only be detected and tested while this setup is connected.
+
+# Creating and deleting configurations.
+profile.no_external = No external monitors connected
+profile.no_external_detail = Connect the monitors for this setup, then try again. The laptop's own screen doesn't count.
+profile.duplicate = Create another configuration?
+profile.duplicate_detail = "{name}" already covers exactly these monitors. When two configurations match, the first one in the list is used.
+profile.delete = Delete "{name}"?
+profile.delete_one_hotkey = The configuration and its hotkey will be removed.
+profile.delete_hotkeys = The configuration and its {count} hotkeys will be removed.
+profile.delete_active_note = This setup is connected now, so a fresh, empty configuration will be created for it when you close this window.
+
+# The Monitors card.
+monitors.not_detected = Inputs not detected yet
+monitors.connect_to_detect = Connect this monitor to detect its inputs
+monitors.nothing_to_add = Nothing to add
+monitors.nothing_to_add_detail = All the connected monitors are already in this configuration.
+monitors.remove = Remove {monitor}?
+monitors.remove_detail = Configurations are recognised by their monitors, so this changes which setups "{name}" matches.
+monitors.remove_one_hotkey = Configurations are recognised by their monitors, so this changes which setups "{name}" matches. Its hotkey will be removed too.
+monitors.remove_hotkeys = Configurations are recognised by their monitors, so this changes which setups "{name}" matches. Its {count} hotkeys will be removed too.
+monitors.none_connected = None of this configuration's monitors are connected.
+monitors.reading = Reading monitors over DDC/CI…
+monitors.some_failed = Some monitors did not report their inputs. Check DDC/CI is on in the monitor's menu.
+monitors.detected = Inputs detected.
+
+# The Hotkeys card.
+hotkeys.empty = No hotkeys yet. Add one to switch a monitor's input from the keyboard.
+hotkeys.removed_monitor = (removed monitor)
+hotkeys.no_monitors = No monitors in this configuration
+hotkeys.no_monitors_detail = Connect a monitor and use Add connected before adding a hotkey.
+hotkeys.remove = Remove {hotkey}?
+hotkeys.remove_detail = The hotkey for {monitor} ({action}) will be removed.
+hotkeys.not_connected = That monitor is not connected.
+hotkeys.testing = Testing {hotkey}…
+
+# ------------------------------------------------------------------------- hotkey editor
+editor.add = Add hotkey
+editor.edit = Edit hotkey
+editor.monitor = Monitor
+editor.key_combination = Key combination
+editor.inputs = Inputs
+editor.inputs_hint = Tick one input to switch to it, two to toggle between them, or more to cycle through them in the order shown.
+editor.other_code = Other input code (hex)
+editor.common_inputs = (inputs not detected; common inputs listed)
+editor.listening = Press the keys now…
+editor.idle = Click here to record a key combination
+editor.hint_listening = Listening — press the keys now. Win shortcuts are captured while this box is selected. Backspace clears it.
+editor.hint_idle = Click the box and press the keys. Use Ctrl, Alt or Win with a key (or F13–F24). Backspace clears it.
+editor.bad_code = Not a valid input code
+editor.bad_code_detail = Enter a hexadecimal code between 01 and FF, for example 1B.
+editor.no_monitor = Choose a monitor
+editor.no_monitor_detail = Pick the monitor this hotkey should switch.
+editor.no_keys = No key combination yet
+editor.no_keys_detail = Click the key combination box and press the keys to use.
+editor.bad_keys = That combination can't be used
+editor.bad_keys_detail = Use Ctrl, Alt or Win with the key (or one of F13–F24).
+editor.no_inputs = This hotkey isn't finished
+editor.no_inputs_detail = Tick at least one input.
+editor.in_use = {hotkey} is already in use
+editor.in_use_here = Another hotkey in this configuration uses it. Choose a different combination, or change the other hotkey.
+editor.in_use_elsewhere = Windows or another app already uses this combination, so InputSwitch can't. Choose another one.
+editor.windows_shortcut = {hotkey} is a Windows shortcut
+editor.windows_shortcut_detail = Windows uses {hotkey} for {what}, so it will probably never reach InputSwitch.
+editor.use_anyway = Use anyway
+
+# ------------------------------------------------------------------------- settings
+settings.title = Settings
+settings.language = Language
+settings.theme = Theme
+settings.theme_system = Use the Windows setting
+settings.theme_light = Light
+settings.theme_dark = Dark
+settings.start_with_windows = Start with Windows
+settings.notify = Notify when the setup changes
+settings.notify_hint = Problems and new setups are always shown.
+
+# ------------------------------------------------------------------------- Windows shortcuts
+# What Windows uses a shortcut for, as in "Windows uses Win + E for {what}".
+shortcut.quick_settings = Quick Settings
+shortcut.notification_area = the notification area
+shortcut.copilot = Copilot
+shortcut.show_desktop = showing the desktop
+shortcut.file_explorer = File Explorer
+shortcut.game_bar = Game Bar
+shortcut.voice_typing = voice typing
+shortcut.settings = Settings
+shortcut.cast = Cast
+shortcut.lock = locking the PC
+shortcut.minimise_all = minimising all windows
+shortcut.notifications = notifications
+shortcut.rotation_lock = rotation lock
+shortcut.projection = projection
+shortcut.search = search
+shortcut.run = Run
+shortcut.taskbar_apps = taskbar apps
+shortcut.accessibility = Accessibility settings
+shortcut.clipboard = clipboard history
+shortcut.widgets = Widgets
+shortcut.quick_link = the Quick Link menu
+shortcut.snap_layouts = Snap layouts
+shortcut.task_view = Task View
+shortcut.keyboard_layout = switching keyboard layout
+shortcut.close_magnifier = closing Magnifier
+shortcut.snap_window = snapping windows
+shortcut.maximise_window = maximising windows
+shortcut.minimise_window = minimising windows
+shortcut.minimise_others = minimising other windows
+shortcut.system_settings = System settings
+shortcut.screenshot = screenshots
+shortcut.magnifier = Magnifier
+shortcut.peek = peeking at the desktop
+shortcut.emoji = the emoji panel
+shortcut.snipping_tool = Snipping Tool
+shortcut.restore_minimised = restoring minimised windows
+shortcut.move_window = moving windows to another monitor
+shortcut.stretch_window = stretching windows
+shortcut.restore_window = restoring windows
+shortcut.new_desktop = new virtual desktops
+shortcut.close_desktop = closing virtual desktops
+shortcut.switch_desktop = switching virtual desktops
+shortcut.narrator = Narrator
+shortcut.narrator_settings = Narrator settings
+shortcut.on_screen_keyboard = the on-screen keyboard
+shortcut.colour_filters = colour filters
+shortcut.magnifier_settings = Magnifier settings
+shortcut.speech = speech recognition
+shortcut.find_computers = finding computers
+shortcut.quick_assist = Quick Assist
+shortcut.restart_graphics = restarting the graphics driver
+shortcut.date_time = the date and time
+shortcut.recording = Game Bar recording
+shortcut.hdr = HDR
+shortcut.mute = muting the microphone
+shortcut.game_bar_screenshot = Game Bar screenshots

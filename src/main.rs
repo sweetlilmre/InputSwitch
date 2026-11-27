@@ -6,6 +6,7 @@
 // What the app does: config, hotkeys, monitors, and the tray icon that ties them together.
 mod config;
 mod hotkey;
+mod i18n;
 mod json;
 mod matcher;
 mod monitors;
@@ -17,6 +18,7 @@ mod tray;
 // Windows: a small UI toolkit, and the app's two windows.
 mod hotkey_editor;
 mod main_window;
+mod settings_window;
 mod ui;
 
 // Support: the command-line diagnostics, and the Windows API declarations.
@@ -38,10 +40,10 @@ fn main() {
     let icc = INITCOMMONCONTROLSEX { dwSize: core::mem::size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_STANDARD_CLASSES };
     unsafe { InitCommonControlsEx(&icc) };
     ui::theme::reload();
+    i18n::set_language(&config::load().0.language);
 
     if !claim_single_instance() {
-        ui::dialog::alert(0, ui::dialog::Icon::Info, "InputSwitch is already running",
-            "Look for its icon in the notification area. Click it to open the settings.");
+        ui::dialog::alert(0, ui::dialog::Icon::Info, i18n::t("startup.already_running"), i18n::t("startup.already_running_detail"));
         return;
     }
     std::process::exit(tray::run(has("--settings")));

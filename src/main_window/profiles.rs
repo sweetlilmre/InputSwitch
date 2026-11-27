@@ -2,15 +2,11 @@
 //! deleting configurations.
 
 use super::*;
+use crate::i18n::{t, tf};
 use crate::matcher;
 use crate::monitors::MonitorInfo;
 use crate::ui::dialog::{self, Icon};
 use crate::ui::lists;
-
-/// What a configuration with a blank name is called.
-pub(super) const UNNAMED: &str = "Unnamed setup";
-/// The start of a connected configuration's status in the list (draw_profile looks for it).
-pub(super) const CONNECTED: &str = "Connected";
 
 impl MainWindow {
     /// The id of the configuration shown.
@@ -36,13 +32,13 @@ impl MainWindow {
     fn profile_label(&self, i: usize) -> String {
         let p = &self.config.profiles[i];
         let mut parts = vec![
-            if self.is_active(i) { CONNECTED.to_string() } else { "Not connected".to_string() },
-            if p.monitors.len() == 1 { "1 monitor".to_string() } else { format!("{} monitors", p.monitors.len()) },
+            if self.is_active(i) { t("common.connected") } else { t("common.not_connected") }.to_string(),
+            if p.monitors.len() == 1 { t("profile.one_monitor").to_string() } else { tf("profile.monitors", &[("count", &p.monitors.len())]) },
         ];
         if !p.enabled {
-            parts.push("hotkeys off".into());
+            parts.push(t("profile.hotkeys_off").into());
         }
-        let name = if p.name.trim().is_empty() { UNNAMED } else { p.name.as_str() };
+        let name = if p.name.trim().is_empty() { t("profile.unnamed") } else { p.name.as_str() };
         format!("{name}\t{}", parts.join(" · "))
     }
 
@@ -85,9 +81,9 @@ impl MainWindow {
                 ui::set_text(self.c.name.edit, "");
                 widgets::set_checked(self.c.enabled, false);
                 let text = if matcher::fingerprint(&self.connected).is_empty() {
-                    "No external monitors are connected. Connect your monitors and a configuration will be created for them automatically."
+                    t("status.no_external")
                 } else {
-                    "No configurations yet. Choose \"New from current setup\" to create one for the monitors connected now."
+                    t("status.no_configurations")
                 };
                 self.set_status(text, Severity::Informational);
             }
@@ -102,11 +98,11 @@ impl MainWindow {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
         let present = p.monitors.iter().filter(|m| self.is_connected(&m.monitor_id)).count();
-        let monitors = format!("({present} of {} monitors present)", p.monitors.len());
+        let monitors = tf("status.present", &[("present", &present), ("count", &p.monitors.len())]);
         let (text, severity) = match (self.is_active(i), p.enabled) {
-            (true, true) => (format!("Connected now {monitors}. Hotkeys are active."), Severity::Success),
-            (true, false) => (format!("Connected now {monitors}. Turn hotkeys on to use them."), Severity::Warning),
-            (false, _) => ("Not connected now. Inputs can only be detected and tested while this setup is connected.".into(), Severity::Informational),
+            (true, true) => (tf("status.active", &[("present", &monitors)]), Severity::Success),
+            (true, false) => (tf("status.hotkeys_off", &[("present", &monitors)]), Severity::Warning),
+            (false, _) => (t("status.not_connected").into(), Severity::Informational),
         };
         self.set_status(&text, severity);
     }
@@ -115,6 +111,7 @@ impl MainWindow {
     fn set_status(&mut self, text: &str, severity: Severity) {
         ui::set_text(self.c.status, text);
         self.status = severity;
+        self.share_background();
         theme::set_surface(self.c.status, theme::Surface::InfoBar(severity), false);
         theme::set_surface(self.c.enabled, theme::Surface::InfoBar(severity), false);
         let r = self.regions.banner;
@@ -142,13 +139,12 @@ impl MainWindow {
     pub(super) fn new_from_current(&mut self) {
         let fp = matcher::fingerprint(&self.connected);
         if fp.is_empty() {
-            dialog::alert(self.hwnd, Icon::Info, "No external monitors connected",
-                "Connect the monitors for this setup, then try again. The laptop's own screen doesn't count.");
+            dialog::alert(self.hwnd, Icon::Info, t("profile.no_external"), t("profile.no_external_detail"));
             return;
         }
         if let Some(existing) = self.config.profiles.iter().find(|p| matcher::ids(p) == fp) {
-            let msg = format!("\"{}\" already covers exactly these monitors. When two configurations match, the first one in the list is used.", existing.name);
-            if !dialog::confirm(self.hwnd, "Create another configuration?", &msg, "Create") {
+            let msg = tf("profile.duplicate_detail", &[("name", &existing.name)]);
+            if !dialog::confirm(self.hwnd, t("profile.duplicate"), &msg, t("common.create")) {
                 return;
             }
         }
@@ -167,10 +163,14 @@ impl MainWindow {
     pub(super) fn delete_profile(&mut self) {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
-        let hotkeys = if p.bindings.len() == 1 { "its hotkey".to_string() } else { format!("its {} hotkeys", p.bindings.len()) };
-        let note = if self.is_active(i) { " This setup is connected now, so a fresh, empty configuration will be created for it when you close this window." } else { "" };
-        let msg = format!("The configuration and {hotkeys} will be removed.{note}");
-        if !dialog::confirm(self.hwnd, &format!("Delete \"{}\"?", p.name), &msg, "Delete") {
+        let mut msg = match p.bindings.len() {
+            1 => t("profile.delete_one_hotkey").to_string(),
+            n => tf("profile.delete_hotkeys", &[("count", &n)]),
+        };
+        if self.is_active(i) {
+            msg = format!("{msg} {}", t("profile.delete_active_note"));
+        }
+        if !dialog::confirm(self.hwnd, &tf("profile.delete", &[("name", &p.name)]), &msg, t("common.delete")) {
             return;
         }
         self.config.profiles.remove(i);

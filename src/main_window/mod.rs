@@ -18,11 +18,12 @@ mod monitor_cards;
 mod monitors;
 mod profiles;
 
-use crate::config::{AppConfig, Theme};
+use crate::config::AppConfig;
 use crate::ffi::*;
+use crate::i18n::{self, t};
 use crate::monitors::MonitorInfo;
 use crate::ui::{self, theme, widgets, Fonts, Mailbox, Slot, WM_MAIL};
-use crate::{sys, tray};
+use crate::{settings_window, sys, tray};
 use layout::{Controls, Regions};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -40,8 +41,6 @@ enum Update {
     Connection { connected: Vec<MonitorInfo>, active: Option<String> },
     /// Show this configuration (from a tray click or a notification).
     Select(Option<String>),
-    /// "Start with Windows" was changed from the tray menu.
-    Startup,
     /// Windows switched between light and dark (or the accent colour changed).
     Theme,
     /// The window moved to a monitor with another DPI.
@@ -120,9 +119,6 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
         current: HashMap::new(), attempted: HashSet::new(), detecting: false, detect_queued: None, typing: false,
     }));
     with(|w| {
-        widgets::set_checked(w.c.startup, sys::startup_enabled());
-        widgets::set_checked(w.c.notify, w.config.show_notifications);
-        widgets::set_checked(w.c.dark, theme::palette().dark);
         w.refresh_profiles(select);
         w.layout();
     });
@@ -135,11 +131,6 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
 /// The connected monitors (or the configuration that matches them) changed.
 pub fn update_connection(connected: Vec<MonitorInfo>, active: Option<String>) {
     MAIL.post(Update::Connection { connected, active });
-}
-
-/// "Start with Windows" was changed elsewhere (the tray menu).
-pub fn startup_changed() {
-    MAIL.post(Update::Startup);
 }
 
 /// Brings the window forward (or the hotkey editor, if it's open) and shows configuration `id`.
@@ -205,9 +196,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             return 0;
         }
         WM_ERASEBKGND => {
-            if with(|s| s.paint_background(w as HDC)).is_none() {
-                ui::draw::fill(w as HDC, ui::draw::client_rect(h), theme::palette().window);
-            }
+            layout::paint_background(h, w as HDC);
             return 1;
         }
         WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORBTN => {
@@ -245,6 +234,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             HWND_MAIN.store(0, Ordering::Relaxed);
             MAIL.close();
             STATE.with(|s| s.take());
+            layout::forget_background();
             tray::post(tray::Event::MainWindowClosed);
             return 0;
         }
@@ -264,9 +254,7 @@ const ID_DETECT: i32 = 106;
 const ID_ADD_CONNECTED: i32 = 107;
 const ID_HOTKEYS: i32 = 108;
 const ID_ADD_HOTKEY: i32 = 109;
-const ID_STARTUP: i32 = 110;
-const ID_NOTIFY: i32 = 111;
-const ID_DARK: i32 = 112;
+const ID_SETTINGS: i32 = 110;
 
 impl MainWindow {
     /// A control's notification. Returns true if the window should close.
@@ -295,12 +283,7 @@ impl MainWindow {
             (ID_DETECT, BN_CLICKED) => self.detect(true),
             (ID_ADD_CONNECTED, BN_CLICKED) => self.add_connected(),
             (ID_ADD_HOTKEY, BN_CLICKED) => self.add_hotkey(),
-            (ID_STARTUP, BN_CLICKED) => self.set_startup(),
-            (ID_NOTIFY, BN_CLICKED) => {
-                self.config.show_notifications = widgets::checked(self.c.notify);
-                self.commit();
-            }
-            (ID_DARK, BN_CLICKED) => self.set_theme(if widgets::checked(self.c.dark) { Theme::Dark } else { Theme::Light }),
+            (ID_SETTINGS, BN_CLICKED) => self.open_settings(),
             (IDCANCEL, _) => {
                 self.commit_pending();
                 return true;
@@ -322,7 +305,6 @@ impl MainWindow {
                     self.refresh_profiles(id.as_deref());
                 }
                 Update::Select(id) => self.refresh_profiles(id.as_deref()),
-                Update::Startup => widgets::set_checked(self.c.startup, sys::startup_enabled()),
                 Update::Theme => {
                     theme::reload();
                     self.retheme();
@@ -357,7 +339,7 @@ impl MainWindow {
     fn commit_pending(&mut self) {
         let mut pending = self.typing;
         for p in self.config.profiles.iter_mut().filter(|p| p.name.trim().is_empty()) {
-            p.name = profiles::UNNAMED.into();
+            p.name = t("profile.unnamed").into();
             pending = true;
         }
         if pending {
@@ -365,19 +347,39 @@ impl MainWindow {
         }
     }
 
-    // -------------------------------------------------------------------------------- options
+    // -------------------------------------------------------------------------------- settings
 
-    fn set_startup(&mut self) {
-        if !sys::set_startup(widgets::checked(self.c.startup)) {
-            ui::dialog::alert(self.hwnd, ui::dialog::Icon::Warning, "Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.");
-            widgets::set_checked(self.c.startup, sys::startup_enabled());
-        }
+    /// Opens the Settings dialog; each change in it is applied and saved as it's made.
+    fn open_settings(&mut self) {
+        let config = self.config.clone();
+        settings_window::run(self.hwnd, self.dpi, &config, &mut |change| self.apply_setting(change));
     }
 
-    fn set_theme(&mut self, choice: Theme) {
-        self.config.theme = choice;
-        theme::set_dark(choice.dark()); // re-theme straight away; the tray sets it again when it saves
-        self.retheme();
+    fn apply_setting(&mut self, change: settings_window::Change) {
+        use settings_window::Change;
+        match change {
+            Change::Language(code) => {
+                self.config.language = code.into();
+                i18n::set_language(code);
+                self.show_texts();
+            }
+            Change::Theme(choice) => {
+                self.config.theme = choice;
+                theme::set_dark(choice.dark()); // re-theme straight away; the tray sets it again when it saves
+                self.retheme();
+            }
+            Change::Notify(on) => self.config.show_notifications = on,
+        }
         self.commit();
+    }
+
+    /// Shows everything in the current language.
+    fn show_texts(&mut self) {
+        self.c.set_texts();
+        let id = self.selected_id();
+        self.refresh_profiles(id.as_deref());
+        ui::set_text(self.c.activity, "");
+        self.layout();
+        theme::repaint(self.hwnd);
     }
 }

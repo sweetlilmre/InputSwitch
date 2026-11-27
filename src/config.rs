@@ -1,7 +1,8 @@
-//! Settings: the data model and the JSON file, config.json. The format is the one older (C#) versions of InputSwitch wrote, so upgrading keeps
-//! everyone's settings.
+//! Settings: the data model and the JSON file, config.json. The format is the one older (C#)
+//! versions of InputSwitch wrote, so upgrading keeps everyone's settings.
 
 use crate::hotkey::Hotkey;
+use crate::i18n::{self, t, tf};
 use crate::json::{self, Json};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,11 +13,13 @@ pub struct AppConfig {
     pub profiles: Vec<Profile>,
     pub show_notifications: bool,
     pub theme: Theme,
+    /// The language code (see [`i18n::LANGUAGES`]).
+    pub language: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        AppConfig { profiles: Vec::new(), show_notifications: true, theme: Theme::System }
+        AppConfig { profiles: Vec::new(), show_notifications: true, theme: Theme::System, language: i18n::DEFAULT.into() }
     }
 }
 
@@ -133,6 +136,7 @@ impl AppConfig {
             ("Profiles".into(), Json::Arr(self.profiles.iter().map(Profile::to_json).collect())),
             ("ShowNotifications".into(), Json::Bool(self.show_notifications)),
             ("Theme".into(), string(self.theme.name())),
+            ("Language".into(), string(&self.language)),
         ])
     }
 
@@ -142,6 +146,7 @@ impl AppConfig {
             profiles: v.arr("Profiles").iter().map(Profile::from_json).collect(),
             show_notifications: v.bool("ShowNotifications").unwrap_or(true),
             theme: Theme::parse(v.str("Theme")),
+            language: v.str("Language").unwrap_or(i18n::DEFAULT).to_string(),
         }
     }
 }
@@ -161,7 +166,7 @@ impl Profile {
     fn from_json(v: &Json) -> Profile {
         Profile {
             id: v.str("Id").map(str::to_string).unwrap_or_else(crate::sys::new_id),
-            name: v.str("Name").unwrap_or("Unnamed setup").to_string(),
+            name: v.str("Name").unwrap_or(t("profile.unnamed")).to_string(),
             enabled: v.bool("Enabled").unwrap_or(false),
             created_utc: date_or_now(v.str("CreatedUtc")),
             monitors: v.arr("Monitors").iter().map(ProfileMonitor::from_json).collect(),
@@ -267,7 +272,7 @@ pub fn load() -> (AppConfig, Option<String>) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (AppConfig::default(), None),
         Err(e) => {
             KEEP_FILE.store(true, Ordering::Relaxed);
-            return (AppConfig::default(), Some(format!("{e}. The file was left as it is; changes won't be saved this session.")));
+            return (AppConfig::default(), Some(tf("storage.left_as_is", &[("error", &e)])));
         }
     };
     match json::parse(&decode(&bytes)) {
@@ -275,8 +280,8 @@ pub fn load() -> (AppConfig, Option<String>) {
         Err(e) => {
             let kept = std::fs::copy(&path, backup_path()).is_ok();
             KEEP_FILE.store(!kept, Ordering::Relaxed);
-            let note = if kept { format!("The unreadable file was kept as config.json.bad in {}.", dir().display()) } else { "Changes won't be saved this session.".into() };
-            (AppConfig::default(), Some(format!("{e}. {note}")))
+            let problem = if kept { tf("storage.kept_as_bad", &[("error", &e), ("folder", &dir().display())]) } else { tf("storage.not_saved", &[("error", &e)]) };
+            (AppConfig::default(), Some(problem))
         }
     }
 }
@@ -328,7 +333,7 @@ fn windows_1252(b: u8) -> char {
 /// Saves atomically: write a temporary file, then replace.
 pub fn save(cfg: &AppConfig) -> std::io::Result<()> {
     if KEEP_FILE.load(Ordering::Relaxed) {
-        return Err(std::io::Error::other("The settings file couldn't be read when InputSwitch started, so it isn't overwritten. Restart InputSwitch to try again."));
+        return Err(std::io::Error::other(t("storage.not_overwritten")));
     }
     std::fs::create_dir_all(dir())?;
     let path = file_path();

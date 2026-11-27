@@ -24,6 +24,7 @@ pub const ICON_KEYBOARD: char = '\u{E765}';
 pub const ICON_MONITOR: char = '\u{E7F4}';
 pub const ICON_PLAY: char = '\u{E768}';
 pub const ICON_REFRESH: char = '\u{E72C}';
+pub const ICON_SETTINGS: char = '\u{E713}';
 pub const ICON_TICK: char = '\u{E73E}';
 pub const ICON_UP: char = '\u{E70E}';
 pub const ICON_WARNING: char = '\u{E7BA}';

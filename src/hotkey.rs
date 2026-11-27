@@ -39,7 +39,7 @@ impl Hotkey {
     /// "Ctrl + Alt + M".
     pub fn display(&self) -> String {
         if self.is_empty() {
-            return "(none)".into();
+            return crate::i18n::t("common.none").into();
         }
         self.key_names().join(" + ")
     }

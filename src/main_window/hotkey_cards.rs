@@ -2,6 +2,7 @@
 //! the action (and monitor) beside them, and Test, Edit and Delete buttons.
 
 use crate::ffi::*;
+use crate::i18n::t;
 use crate::ui::card_panel::{self, Cards, Ctx};
 use crate::ui::draw::{self, rect, RectExt};
 use crate::ui::theme::{self, Surface};
@@ -66,7 +67,6 @@ const BUTTON_GAP: i32 = 4;
 const EMPTY_TOP: i32 = 16;
 const EMPTY_H: i32 = 20;
 
-const EMPTY: &str = "No hotkeys yet. Add one to switch a monitor's input from the keyboard.";
 
 struct Card {
     row: Row,
@@ -130,7 +130,7 @@ impl Cards for HotkeyCards {
         let s = |v| cx.s(v);
         if self.cards.is_empty() {
             let r = RECT { left: 0, top: s(EMPTY_TOP) - dy, right: draw::client_rect(cx.panel).right, bottom: s(EMPTY_TOP + EMPTY_H) - dy };
-            draw::text(hdc, EMPTY, r, cx.fonts.normal, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
+            draw::text(hdc, t("hotkeys.empty"), r, cx.fonts.normal, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
             return;
         }
         for c in &self.cards {

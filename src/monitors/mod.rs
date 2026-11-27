@@ -166,7 +166,7 @@ fn friendly_name(t: &Target, edid: Option<&edid::Edid>, model: &str) -> String {
     } else if let Some(name) = edid.and_then(|e| e.model_name.clone()) {
         name
     } else if t.internal {
-        "Built-in display".into()
+        crate::i18n::t("monitor.built_in").into()
     } else {
         model.to_string()
     }

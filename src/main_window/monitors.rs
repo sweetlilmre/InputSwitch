@@ -4,6 +4,7 @@
 use super::monitor_cards::{self, Action};
 use super::*;
 use crate::config::ProfileMonitor;
+use crate::i18n::{t, tf};
 use crate::monitors;
 use crate::ui::dialog::{self, Icon};
 
@@ -41,8 +42,8 @@ impl MainWindow {
             chips: m.supported_inputs.iter().map(|&c| (monitors::short_name(c), current == Some(c))).collect(),
             hint: match (m.supported_inputs.is_empty(), connected) {
                 (false, _) => String::new(),
-                (true, true) => "Inputs not detected yet".into(),
-                (true, false) => "Connect this monitor to detect its inputs".into(),
+                (true, true) => t("monitors.not_detected").into(),
+                (true, false) => t("monitors.connect_to_detect").into(),
             },
         }
     }
@@ -77,7 +78,7 @@ impl MainWindow {
             .map(ProfileMonitor::from_connected)
             .collect();
         if missing.is_empty() {
-            dialog::alert(self.hwnd, Icon::Info, "Nothing to add", "All the connected monitors are already in this configuration.");
+            dialog::alert(self.hwnd, Icon::Info, t("monitors.nothing_to_add"), t("monitors.nothing_to_add_detail"));
             return;
         }
         for m in missing {
@@ -97,13 +98,13 @@ impl MainWindow {
         let p = &self.config.profiles[i];
         let Some(m) = p.monitors.get(row) else { return };
         let used = p.bindings.iter().filter(|b| b.monitor_id.eq_ignore_ascii_case(&m.monitor_id)).count();
-        let also = match used {
-            0 => String::new(),
-            1 => " Its hotkey will be removed too.".into(),
-            n => format!(" Its {n} hotkeys will be removed too."),
+        let key = match used {
+            0 => "monitors.remove_detail",
+            1 => "monitors.remove_one_hotkey",
+            _ => "monitors.remove_hotkeys",
         };
-        let msg = format!("Configurations are recognised by their monitors, so this changes which setups \"{}\" matches.{also}", p.name);
-        if !dialog::confirm(self.hwnd, &format!("Remove {}?", m.name), &msg, "Remove") {
+        let msg = tf(key, &[("name", &p.name), ("count", &used)]);
+        if !dialog::confirm(self.hwnd, &tf("monitors.remove", &[("monitor", &m.name)]), &msg, t("common.remove")) {
             return;
         }
         let p = &mut self.config.profiles[i];
@@ -132,13 +133,13 @@ impl MainWindow {
             .collect();
         if targets.is_empty() {
             if force {
-                ui::set_text(self.c.activity, "None of this configuration's monitors are connected.");
+                ui::set_text(self.c.activity, t("monitors.none_connected"));
             }
             return;
         }
         self.attempted.extend(targets.iter().map(|(id, _)| id.to_lowercase()));
         self.detecting = true;
-        ui::set_text(self.c.activity, "Reading monitors over DDC/CI…");
+        ui::set_text(self.c.activity, t("monitors.reading"));
         let generation = MAIL.generation(); // if this window closes, its results are dropped
         std::thread::spawn(move || {
             for (id, m) in targets {
@@ -173,9 +174,9 @@ impl MainWindow {
             self.config.profiles[i].monitors.iter().any(|m| self.is_connected(&m.monitor_id) && m.supported_inputs.is_empty())
         });
         ui::set_text(self.c.activity, if missing {
-            "Some monitors did not report their inputs. Check DDC/CI is on in the monitor's menu."
+            t("monitors.some_failed")
         } else {
-            "Inputs detected."
+            t("monitors.detected")
         });
         if let Some(force) = self.detect_queued.take() {
             self.detect(force);
@@ -199,6 +200,6 @@ impl MainWindow {
     pub(super) fn monitor_name(&self, id: &str) -> String {
         self.sel.and_then(|i| self.config.profiles[i].monitor(id)).map(|m| m.name.clone())
             .or_else(|| self.connected_monitor(id).map(|m| m.display_name().to_string()))
-            .unwrap_or_else(|| "The monitor".into())
+            .unwrap_or_else(|| t("notify.the_monitor").into())
     }
 }

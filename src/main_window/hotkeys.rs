@@ -3,6 +3,7 @@
 use super::hotkey_cards::{self, Action};
 use super::*;
 use crate::config::Binding;
+use crate::i18n::{t, tf};
 use crate::ui::dialog::{self, Icon};
 use crate::{hotkey_editor, monitors};
 
@@ -23,7 +24,7 @@ impl MainWindow {
             p.bindings.iter().map(|b| hotkey_cards::Row {
                 keys: b.hotkey.key_names(),
                 action: monitors::describe_action(&b.inputs),
-                monitor: p.monitor(&b.monitor_id).map_or_else(|| "(removed monitor)".into(), |m| m.name.clone()),
+                monitor: p.monitor(&b.monitor_id).map_or_else(|| t("hotkeys.removed_monitor").into(), |m| m.name.clone()),
             }).collect()
         });
         hotkey_cards::set_rows(self.c.hotkeys, rows);
@@ -34,7 +35,7 @@ impl MainWindow {
     pub(super) fn add_hotkey(&mut self) {
         let Some(i) = self.sel else { return };
         if self.config.profiles[i].monitors.is_empty() {
-            dialog::alert(self.hwnd, Icon::Info, "No monitors in this configuration", "Connect a monitor and use Add connected before adding a hotkey.");
+            dialog::alert(self.hwnd, Icon::Info, t("hotkeys.no_monitors"), t("hotkeys.no_monitors_detail"));
             return;
         }
         let Some(b) = self.run_editor(i, None) else { return };
@@ -64,8 +65,8 @@ impl MainWindow {
     fn remove_hotkey(&mut self, row: usize) {
         let Some(i) = self.sel else { return };
         let Some(b) = self.config.profiles[i].bindings.get(row) else { return };
-        let msg = format!("The hotkey for {} ({}) will be removed.", self.monitor_name(&b.monitor_id), monitors::describe_action(&b.inputs));
-        if !dialog::confirm(self.hwnd, &format!("Remove {}?", b.hotkey.display()), &msg, "Remove") {
+        let msg = tf("hotkeys.remove_detail", &[("monitor", &self.monitor_name(&b.monitor_id)), ("action", &monitors::describe_action(&b.inputs))]);
+        if !dialog::confirm(self.hwnd, &tf("hotkeys.remove", &[("hotkey", &b.hotkey.display())]), &msg, t("common.remove")) {
             return;
         }
         self.config.profiles[i].bindings.remove(row);
@@ -78,10 +79,10 @@ impl MainWindow {
         let Some(i) = self.sel else { return };
         let Some(b) = self.config.profiles[i].bindings.get(row).cloned() else { return };
         let Some(m) = self.connected_monitor(&b.monitor_id).cloned() else {
-            ui::set_text(self.c.activity, "That monitor is not connected.");
+            ui::set_text(self.c.activity, t("hotkeys.not_connected"));
             return;
         };
-        ui::set_text(self.c.activity, &format!("Testing {}…", b.hotkey.display()));
+        ui::set_text(self.c.activity, &tf("hotkeys.testing", &[("hotkey", &b.hotkey.display())]));
         let generation = MAIL.generation(); // if this window closes, its results are dropped
         std::thread::spawn(move || {
             let result = monitors::run_binding(&b.inputs, &m);

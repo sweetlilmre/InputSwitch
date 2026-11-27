@@ -16,6 +16,7 @@ InputSwitch also remembers each place you work. Your desk at work and your desk 
 - [Getting started](#getting-started)
 - [Work, home and anywhere else](#work-home-and-anywhere-else)
 - [The main window](#the-main-window)
+- [Settings and languages](#settings-and-languages)
 - [Making a hotkey](#making-a-hotkey)
 - [The tray icon](#the-tray-icon)
 - [Notifications](#notifications)
@@ -47,7 +48,7 @@ There's no Save button in the main window: every change is saved as you make it.
 
 > **Tip:** before you try a hotkey, make sure something is plugged into the input you're switching to. Otherwise the screen shows "No signal" until you switch back.
 
-To have InputSwitch start every time you sign in, tick **Start with Windows**.
+To have InputSwitch start every time you sign in, click **Settings** and turn on **Start with Windows**.
 
 ## Work, home and anywhere else
 
@@ -71,9 +72,22 @@ InputSwitch recognises your monitors individually, even two of the same model, s
   - **Detect inputs** checks again which inputs your monitors have.
   - **Add connected** adds a newly plugged-in monitor to this configuration.
 - **Hotkeys** lists your hotkeys. Use ▷ to try one, ✎ to change it, or 🗑 to remove it (you're asked first).
-- **At the bottom** are **Start with Windows**, **Notify when the setup changes**, **Dark mode** and **Close**. InputSwitch starts out matching Windows' light or dark setting; flip **Dark mode** to choose for yourself.
+- **At the bottom** are **Settings** (see below) and **Close**.
 
 Changes are saved as you make them, and take effect straight away. Your hotkeys keep working while the window is open; they only pause while the hotkey editor is open, so a combination can't fire while you're recording it.
+
+## Settings and languages
+
+Click **Settings** at the bottom of the main window for the options that apply everywhere:
+
+- **Language:** InputSwitch is in English to start with, and also speaks Afrikaans. The change shows straight away.
+- **Theme:** **Use the Windows setting** (the default) follows Windows' light or dark mode; **Light** or **Dark** chooses for yourself.
+- **Start with Windows** starts InputSwitch every time you sign in.
+- **Notify when the setup changes** shows a message each time you plug into a known setup. Problems and new setups are always shown.
+
+Like everything else, these are saved as you change them.
+
+Would you like InputSwitch in your language? Each language is a plain text file in the [`lang`](lang) folder: copy `en.txt`, translate the text after each `=`, and send it in. The [technical notes](docs/TECHNICAL.md#translations) have the details.
 
 ## Making a hotkey
 
@@ -112,7 +126,7 @@ InputSwitch sits in the notification area as a small blue monitor with two arrow
 InputSwitch pops up a short message when:
 
 - you plug into a **new setup**. Click it to set the setup up.
-- you plug into a **known setup**, for example "Display setup: Home". You can turn these off with **Notify when the setup changes**.
+- you plug into a **known setup**, for example "Display setup: Home". You can turn these off with **Notify when the setup changes**, in **Settings**.
 - something needs your attention, for example a hotkey another app is already using, or a monitor that didn't respond.
 
 ## Something not working?
@@ -155,6 +169,6 @@ InputSwitch doesn't connect to the internet or send anything anywhere.
 
 **To uninstall:**
 
-1. Untick **Start with Windows**.
+1. Turn off **Start with Windows** in **Settings**.
 2. Right-click the tray icon and choose **Exit**.
 3. Delete the InputSwitch folder, and the settings folder too if you don't want to keep your settings.

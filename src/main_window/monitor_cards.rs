@@ -3,6 +3,7 @@
 //! Connected / Not connected pill, and a delete button.
 
 use crate::ffi::*;
+use crate::i18n::t;
 use crate::ui::card_panel::{self, Cards, Ctx};
 use crate::ui::draw::{self, rect, RectExt};
 use crate::ui::theme::{self, Surface};
@@ -107,7 +108,7 @@ pub struct MonitorCards {
 }
 
 fn pill_text(connected: bool) -> &'static str {
-    if connected { "Connected" } else { "Not connected" }
+    if connected { t("common.connected") } else { t("common.not_connected") }
 }
 
 impl MonitorCards {
