@@ -9,14 +9,15 @@ pub fn scale(v: i32, dpi: u32) -> i32 {
     (v as i64 * dpi as i64 / 96) as i32
 }
 
-pub fn make_font(dpi: u32, points: i32, weight: i32) -> HFONT {
-    font_face("Segoe UI", dpi, points, weight)
+/// Segoe UI at px pixels (at 96 DPI), the way WPF sizes text, so sizes match the C# app's.
+pub fn make_font(dpi: u32, px: i32, weight: i32) -> HFONT {
+    font_face("Segoe UI", dpi, px, weight)
 }
 
-fn font_face(face: &str, dpi: u32, points: i32, weight: i32) -> HFONT {
+fn font_face(face: &str, dpi: u32, px: i32, weight: i32) -> HFONT {
     unsafe {
         // DEFAULT_CHARSET = 1, CLEARTYPE_QUALITY = 5
-        CreateFontW(-(points * dpi as i32 / 72), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, wide(face).as_ptr())
+        CreateFontW(-scale(px, dpi), 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, wide(face).as_ptr())
     }
 }
 
@@ -38,6 +39,10 @@ pub struct Fonts {
     pub normal: HFONT,
     pub bold: HFONT,
     pub title: HFONT,
+    /// Small secondary text: status lines, hints, subtitles, the version.
+    pub small: HFONT,
+    /// The configuration list's monitor glyphs.
+    pub nav_icon: HFONT,
     /// Section headings ("Configurations", "Monitors", "Hotkeys").
     pub section: HFONT,
     /// Fluent icon glyphs for buttons.
@@ -47,11 +52,15 @@ pub struct Fonts {
 impl Fonts {
     pub fn new(dpi: u32) -> Fonts {
         Fonts {
-            normal: make_font(dpi, 9, 400),
-            bold: make_font(dpi, 9, 600),
-            title: make_font(dpi, 16, 600),
-            section: make_font(dpi, 12, 600),
-            icon: font_face(icon_face(), dpi, 9, 400),
+            // The C# app's Fluent sizes: body 14, field labels 14 semibold, the name box 24
+            // semibold, section titles 16 semibold, secondary text 12, icons 14 (18 in the list).
+            normal: make_font(dpi, 14, 400),
+            bold: make_font(dpi, 14, 600),
+            title: make_font(dpi, 24, 600),
+            small: make_font(dpi, 12, 400),
+            nav_icon: font_face(icon_face(), dpi, 18, 400),
+            section: make_font(dpi, 16, 600),
+            icon: font_face(icon_face(), dpi, 14, 400),
         }
     }
 }
@@ -62,6 +71,8 @@ impl Drop for Fonts {
             DeleteObject(self.normal);
             DeleteObject(self.bold);
             DeleteObject(self.title);
+            DeleteObject(self.small);
+            DeleteObject(self.nav_icon);
             DeleteObject(self.section);
             DeleteObject(self.icon);
         }
@@ -288,8 +299,8 @@ pub fn confirm(owner: HWND, main: &str, content: &str, action: &str) -> bool {
 }
 
 /// A Segoe Fluent Icons font at points.
-pub fn icon_font(dpi: u32, points: i32) -> HFONT {
-    font_face(icon_face(), dpi, points, 400)
+pub fn icon_font(dpi: u32, px: i32) -> HFONT {
+    font_face(icon_face(), dpi, px, 400)
 }
 
 /// Runs a modal message loop for `dialog` (owner disabled) until `done()` is true.

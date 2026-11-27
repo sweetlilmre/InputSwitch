@@ -316,14 +316,14 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
     let profiles = ui::child(h, "LISTBOX", "", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 0, ID_PROFILES, n);
     theme::set_surface(profiles, Window, false);
     theme::apply_control(profiles, theme::ControlKind::ListBox);
-    let saved_note = ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, n);
+    let saved_note = ui::child(h, "STATIC", "Changes are saved automatically", SS_NOPREFIX | SS_RIGHT, 0, 0, f.small);
     theme::set_surface(saved_note, Layer, true);
     let c = Controls {
         configs_label: ui::label_on(h, "Configurations", f.section, Window, false),
         profiles,
         new: widgets::button(h, "New from current setup", ID_NEW, Some(widgets::ICON_ADD), f, Window),
         delete: widgets::button(h, "Delete configuration", ID_DELETE, Some(widgets::ICON_DELETE), f, Window),
-        version: ui::label_on(h, &format!("Version {}", sys::display_version()), n, Window, true),
+        version: ui::label_on(h, &format!("Version {}", sys::display_version()), f.small, Window, true),
         name_label: ui::label_on(h, "Name:", n, Layer, true),
         name,
         enabled: widgets::checkbox(h, "Hotkeys on", ID_ENABLED, f, Banner),
@@ -340,7 +340,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         edit_hotkey: widgets::button(h, "Edit", ID_EDIT_HOTKEY, Some(widgets::ICON_EDIT), f, Card),
         remove_hotkey: widgets::button(h, "Remove", ID_REMOVE_HOTKEY, Some(widgets::ICON_DELETE), f, Card),
         test_hotkey: widgets::button(h, "Test", ID_TEST_HOTKEY, Some(widgets::ICON_PLAY), f, Card),
-        activity: ui::label_on(h, "", n, Layer, true),
+        activity: ui::label_on(h, "", f.small, Layer, true),
         startup: widgets::checkbox(h, "Start with Windows", ID_STARTUP, f, Layer),
         notify: widgets::checkbox(h, "Notify when the setup changes", ID_NOTIFY, f, Layer),
         dark: widgets::switch(h, "Dark mode", ID_DARK, f, Layer),
@@ -524,11 +524,11 @@ impl Settings {
             theme::round_rect(hdc, RECT { left: pill.left, top: mid - bar_h / 2, right: pill.left + sc(3), bottom: mid + bar_h / 2 }, sc(2), p.accent, None);
         }
         let icon = RECT { left: pill.left + sc(12), top: pill.top, right: pill.left + sc(36), bottom: pill.bottom };
-        theme::text(hdc, "\u{E7F4}", icon, self.fonts.icon, if connected { p.accent } else { p.text2 }, DT_VCENTER | DT_SINGLELINE);
+        theme::text(hdc, "\u{E7F4}", icon, self.fonts.nav_icon, if connected { p.accent } else { p.text2 }, DT_VCENTER | DT_SINGLELINE);
         let tx = pill.left + sc(40);
         let mid = (pill.top + pill.bottom) / 2;
         theme::text(hdc, title, RECT { left: tx, top: pill.top + sc(4), right: pill.right - sc(8), bottom: mid + sc(1) }, self.fonts.normal, p.text, DT_SINGLELINE | DT_END_ELLIPSIS | 0x0008 /* DT_BOTTOM */);
-        theme::text(hdc, subtitle, RECT { left: tx, top: mid + sc(1), right: pill.right - sc(8), bottom: pill.bottom - sc(4) }, self.fonts.normal, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
+        theme::text(hdc, subtitle, RECT { left: tx, top: mid + sc(1), right: pill.right - sc(8), bottom: pill.bottom - sc(4) }, self.fonts.small, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     /// Re-applies the palette after Windows switches between light and dark (or the accent changes).
@@ -552,6 +552,9 @@ impl Settings {
         }
         for h in [self.c.configs_label, self.c.monitors_label, self.c.hotkeys_label] {
             unsafe { SendMessageW(h, WM_SETFONT, fonts.section as usize, 1) };
+        }
+        for h in [self.c.activity, self.c.saved_note, self.c.version] {
+            unsafe { SendMessageW(h, WM_SETFONT, fonts.small as usize, 1) };
         }
         unsafe {
             SendMessageW(self.c.name, WM_SETFONT, fonts.title as usize, 1);

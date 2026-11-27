@@ -197,7 +197,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
 
     p(ui::label_on(h, "Key combination", f.bold, Surface::Window, false), m, 74, w, 20);
     // The hint under the box says whether it's listening; it wraps onto a second line.
-    let hint = ui::child(h, "STATIC", "", SS_NOPREFIX, 0, 0, n);
+    let hint = ui::child(h, "STATIC", "", SS_NOPREFIX, 0, 0, f.small);
     theme::set_surface(hint, Surface::Window, true);
     p(hint, m, 134, w, 34);
     let hotkey = hotkey_box::create(h, ID_HOTKEY, n, initial, hint);
@@ -205,7 +205,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
     p(hotkey, m + 2, 103, w - 4, 20);
 
     p(ui::label_on(h, "Inputs", f.bold, Surface::Window, false), m, 174, w, 20);
-    p(ui::label_on(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", n, Surface::Window, true), m, 196, w, 20);
+    p(ui::label_on(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", f.small, Surface::Window, true), m, 196, w, 20);
     let inputs = ui::listview(h, ID_INPUTS, LVS_NOCOLUMNHEADER, LVS_EX_CHECKBOXES, n);
     frames.push((r(m, 220, w - 100, 150), false));
     p(inputs, m + 1, 221, w - 102, 148);

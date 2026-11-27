@@ -69,8 +69,8 @@ pub fn show(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
     let dpi = unsafe { if owner != 0 { GetDpiForWindow(owner) } else { GetDpiForSystem() } }.max(96);
     let sc = |v: i32| ui::scale(v, dpi);
     let fonts = Fonts::new(dpi);
-    let heading_font = ui::make_font(dpi, 15, 600);
-    let glyph_font = ui::icon_font(dpi, 15);
+    let heading_font = ui::make_font(dpi, 20, 600);
+    let glyph_font = ui::icon_font(dpi, 20);
 
     // Height: the text column, or the badge if taller, then the footer.
     let text_w = sc(WIDTH - PAD - BADGE - 16 - PAD);
