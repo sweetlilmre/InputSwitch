@@ -99,7 +99,7 @@ pub fn is_raw_key(msg: &MSG) -> bool {
 
 /// The box's background: tinted while listening, otherwise the normal input colour.
 pub fn background() -> u32 {
-    let p = crate::theme::palette();
+    let p = crate::ui::theme::palette();
     if LISTENING.load(Ordering::Relaxed) { p.listening } else { p.control }
 }
 
@@ -115,10 +115,10 @@ pub fn ctl_color(hdc: HDC, control: HWND) -> Option<LRESULT> {
     }
     let bg = background();
     unsafe {
-        SetTextColor(hdc, crate::theme::palette().text);
+        SetTextColor(hdc, crate::ui::theme::palette().text);
         SetBkColor(hdc, bg);
     }
-    Some(crate::theme::brush(bg))
+    Some(crate::ui::theme::brush(bg))
 }
 /// Updates the tint, the hint and the placeholder for whether the box is listening.
 fn set_listening(h: HWND, on: bool) {

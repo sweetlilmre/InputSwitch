@@ -10,7 +10,8 @@ pub fn fingerprint(monitors: &[MonitorInfo]) -> HashSet<String> {
     monitors.iter().filter(|m| !m.internal).map(|m| m.id.to_lowercase()).collect()
 }
 
-fn ids(p: &Profile) -> HashSet<String> {
+/// A configuration's monitors, as a fingerprint (lower-case ids).
+pub fn ids(p: &Profile) -> HashSet<String> {
     p.monitors.iter().map(|m| m.monitor_id.to_lowercase()).collect()
 }
 
@@ -49,13 +50,7 @@ pub fn create_for(monitors: &[MonitorInfo], config: &AppConfig) -> Profile {
         name,
         enabled: false,
         created_utc: crate::sys::utc_now(),
-        monitors: monitors.iter().filter(|m| !m.internal).map(|m| ProfileMonitor {
-            monitor_id: m.id.clone(),
-            name: m.display_name().to_string(),
-            model: m.model.clone(),
-            serial: m.serial.clone(),
-            supported_inputs: Vec::new(),
-        }).collect(),
+        monitors: monitors.iter().filter(|m| !m.internal).map(ProfileMonitor::from_connected).collect(),
         bindings: Vec::new(),
     }
 }

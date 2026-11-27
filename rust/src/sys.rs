@@ -1,12 +1,13 @@
-//! Small system helpers: IDs, timestamps, version, "Start with Windows".
+//! Small system helpers: IDs, timestamps, the version, and "Start with Windows".
 
 use crate::ffi::*;
+use crate::registry::RegKey;
 
 /// 32 random hex digits (like a GUID in "N" format).
 pub fn new_id() -> String {
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 2;
     let mut b = [0u8; 16];
-    // BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2
-    unsafe { BCryptGenRandom(0, b.as_mut_ptr(), b.len() as u32, 2) };
+    unsafe { BCryptGenRandom(0, b.as_mut_ptr(), b.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
@@ -20,12 +21,16 @@ pub fn utc_now() -> String {
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("GIT_COMMIT");
 
+// build.rs sets GIT_COMMIT, to "" when git isn't available.
+
 /// "0.1.0+<commit>" when the commit is known.
+#[allow(clippy::const_is_empty)]
 pub fn full_version() -> String {
     if COMMIT.is_empty() { VERSION.into() } else { format!("{VERSION}+{COMMIT}") }
 }
 
 /// "0.1.0 (abc1234)".
+#[allow(clippy::const_is_empty)]
 pub fn display_version() -> String {
     if COMMIT.is_empty() { VERSION.into() } else { format!("{VERSION} ({})", &COMMIT[..COMMIT.len().min(7)]) }
 }
@@ -40,37 +45,15 @@ fn startup_command() -> String {
     format!("\"{exe}\"")
 }
 
+/// Whether Windows starts this copy of the app at sign-in.
 pub fn startup_enabled() -> bool {
-    unsafe {
-        let mut key: HKEY = 0;
-        if RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, KEY_READ, &mut key) != 0 {
-            return false;
-        }
-        let mut buf = [0u16; 1024];
-        let mut len = (buf.len() * 2) as u32;
-        let mut kind = 0u32;
-        let ok = RegQueryValueExW(key, wide(RUN_VALUE).as_ptr(), core::ptr::null_mut(), &mut kind, buf.as_mut_ptr() as *mut u8, &mut len) == 0;
-        RegCloseKey(key);
-        ok && kind == REG_SZ && from_wide(&buf).eq_ignore_ascii_case(&startup_command())
-    }
+    RegKey::open(HKEY_CURRENT_USER, RUN_KEY)
+        .and_then(|k| k.string(RUN_VALUE))
+        .is_some_and(|cmd| cmd.eq_ignore_ascii_case(&startup_command()))
 }
 
+/// Turns "Start with Windows" on or off. False if the registry couldn't be written.
 pub fn set_startup(enabled: bool) -> bool {
-    unsafe {
-        let mut key: HKEY = 0;
-        if RegCreateKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, core::ptr::null(), 0, KEY_WRITE,
-            core::ptr::null(), &mut key, core::ptr::null_mut()) != 0 {
-            return false;
-        }
-        let name = wide(RUN_VALUE);
-        let rc = if enabled {
-            let value = wide(&startup_command());
-            RegSetValueExW(key, name.as_ptr(), 0, REG_SZ, value.as_ptr() as *const u8, (value.len() * 2) as u32)
-        } else {
-            let rc = RegDeleteValueW(key, name.as_ptr());
-            if rc == 2 { 0 } else { rc } // already absent
-        };
-        RegCloseKey(key);
-        rc == 0
-    }
+    let Some(key) = RegKey::create(HKEY_CURRENT_USER, RUN_KEY) else { return false };
+    if enabled { key.set_string(RUN_VALUE, &startup_command()) } else { key.delete(RUN_VALUE) }
 }

@@ -67,7 +67,7 @@ pub struct POINT {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct RECT {
     pub left: i32,
     pub top: i32,
@@ -484,6 +484,8 @@ pub const HKEY_LOCAL_MACHINE: HKEY = 0x8000_0002u32 as i32 as isize;
 pub const KEY_READ: u32 = 0x20019;
 pub const KEY_WRITE: u32 = 0x20006;
 pub const REG_SZ: u32 = 1;
+pub const REG_DWORD: u32 = 4;
+pub const ERROR_FILE_NOT_FOUND: i32 = 2;
 
 // CCD.
 pub const QDC_ONLY_ACTIVE_PATHS: u32 = 0x2;
@@ -659,6 +661,7 @@ pub const LB_GETTEXT: u32 = 0x0189;
 pub const LB_GETTEXTLEN: u32 = 0x018A;
 pub const LB_SETITEMHEIGHT: u32 = 0x01A0;
 pub const EM_SETMARGINS: u32 = 0x00D3;
+pub const EM_SETSEL: u32 = 0x00B1;
 pub const EC_LEFTMARGIN: usize = 0x1;
 pub const EC_RIGHTMARGIN: usize = 0x2;
 pub const ODT_LISTBOX: u32 = 2;
@@ -672,6 +675,7 @@ pub const DT_VCENTER: u32 = 0x0004;
 pub const DT_SINGLELINE: u32 = 0x0020;
 pub const DT_NOPREFIX: u32 = 0x0800;
 pub const DT_END_ELLIPSIS: u32 = 0x8000;
+pub const DT_BOTTOM: u32 = 0x0008;
 pub const DT_WORDBREAK: u32 = 0x0010;
 pub const DT_CALCRECT: u32 = 0x0400;
 pub const MB_ICONEXCLAMATION: u32 = 0x30;
@@ -689,6 +693,8 @@ pub const LVM_SETBKCOLOR: u32 = 0x1001;
 pub const LVM_GETHEADER: u32 = 0x101F;
 pub const LVM_SETTEXTCOLOR: u32 = 0x1024;
 pub const LVM_SETTEXTBKCOLOR: u32 = 0x1026;
+pub const LVM_SETITEMW: u32 = 0x104C;
+pub const LVSCW_AUTOSIZE_USEHEADER: isize = -2;
 pub const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
 
 #[repr(C)]
@@ -764,6 +770,16 @@ pub const WM_MOUSEWHEEL: u32 = 0x020A;
 pub const EN_SETFOCUS: u16 = 0x0100;
 pub const EN_KILLFOCUS: u16 = 0x0200;
 pub const SB_VERT: i32 = 1;
+pub const SB_LINEUP: u32 = 0;
+pub const SB_LINEDOWN: u32 = 1;
+pub const SB_PAGEUP: u32 = 2;
+pub const SB_PAGEDOWN: u32 = 3;
+pub const SB_THUMBPOSITION: u32 = 4;
+pub const SB_THUMBTRACK: u32 = 5;
+pub const SB_TOP: u32 = 6;
+pub const SB_BOTTOM: u32 = 7;
+pub const SM_CXSCREEN: i32 = 0;
+pub const SM_CYSCREEN: i32 = 1;
 pub const SIF_RANGE: u32 = 0x1;
 pub const SIF_PAGE: u32 = 0x2;
 pub const SIF_POS: u32 = 0x4;
@@ -795,6 +811,7 @@ extern "system" {
 pub const NM_CUSTOMDRAW: u32 = (-12i32) as u32;
 pub const CDDS_PREPAINT: u32 = 0x0000_0001;
 pub const CDDS_ITEMPREPAINT: u32 = 0x0001_0001;
+pub const CDRF_DODEFAULT: LRESULT = 0;
 pub const CDRF_NOTIFYITEMDRAW: LRESULT = 0x20;
 
 #[repr(C)]

@@ -7,7 +7,8 @@
 use crate::config::{self, AppConfig};
 use crate::ffi::*;
 use crate::monitors::{self, MonitorInfo};
-use crate::{matcher, settings, sys, ui};
+use crate::ui::{self, dialog};
+use crate::{main_window, matcher, sys};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -26,7 +27,7 @@ pub enum Event {
     ConfigChanged(AppConfig),
     /// The hotkey editor opened (true) or closed (false): pause or resume the hotkeys.
     Capturing(bool),
-    SettingsClosed,
+    MainWindowClosed,
 }
 
 static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
@@ -54,7 +55,7 @@ struct Tray {
     config: AppConfig,
     connected: Vec<MonitorInfo>,
     active: Option<String>,
-    settings_open: bool,
+    main_window_open: bool,
     /// The hotkey editor is open: hotkeys are paused meanwhile.
     capturing: bool,
     /// Registration failures last reported, so the same ones aren't reported on every change.
@@ -73,7 +74,7 @@ fn with<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
     TRAY.with(|t| t.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
 }
 
-pub fn run(open_settings: bool) -> i32 {
+pub fn run(open_main_window: bool) -> i32 {
     let icon = ui::app_icon();
     ui::register_class(CLASS, wndproc, icon);
     let hwnd = unsafe {
@@ -85,31 +86,31 @@ pub fn run(open_settings: bool) -> i32 {
 
     let (config, error) = config::load();
     if let Some(e) = error {
-        ui::alert(0, ui::Icon::Warning, "Your settings couldn't be read",
+        dialog::alert(0, dialog::Icon::Warning, "Your settings couldn't be read",
             &format!("{e}\n\nInputSwitch will start with fresh settings. The unreadable file was kept as config.json.bad in {}.", config::dir().display()));
     }
     let first_run = config.profiles.is_empty();
-    crate::theme::set_choice(config.theme);
+    crate::ui::theme::set_choice(config.theme);
 
     TRAY.with(|t| {
         *t.borrow_mut() = Some(Tray {
-            hwnd, icon, config, connected: Vec::new(), active: None, settings_open: false, capturing: false, last_failures: String::new(), balloon: None, hotkeys: Vec::new(),
+            hwnd, icon, config, connected: Vec::new(), active: None, main_window_open: false, capturing: false, last_failures: String::new(), balloon: None, hotkeys: Vec::new(),
         })
     });
     unsafe { WTSRegisterSessionNotification(hwnd, 0) };
     with(|t| {
         t.add_icon();
         t.evaluate(first_run);
-        if open_settings && !t.settings_open {
+        if open_main_window && !t.main_window_open {
             let active = t.active.clone();
-            t.open_settings(active);
+            t.open_main_window(active);
         }
     });
 
     let mut msg: MSG = zeroed();
     unsafe {
         while GetMessageW(&mut msg, 0, 0, 0) > 0 {
-            let s = settings::hwnd();
+            let s = main_window::hwnd();
             if s != 0 && IsDialogMessageW(s, &mut msg) != 0 {
                 continue;
             }
@@ -139,14 +140,14 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
                 NIN_SELECT | NIN_KEYSELECT => {
                     with(|t| {
                         let active = t.active.clone();
-                        t.open_settings(active)
+                        t.open_main_window(active)
                     });
                 }
                 x if x as u32 == WM_CONTEXTMENU => show_menu(h),
                 NIN_BALLOONUSERCLICK => {
                     with(|t| {
                         if let Some(target) = t.balloon.take() {
-                            t.open_settings(target);
+                            t.open_main_window(target);
                         }
                     });
                 }
@@ -203,7 +204,7 @@ fn show_menu(h: HWND) {
 }
 
 fn exit(h: HWND) {
-    settings::destroy();
+    main_window::destroy();
     with(|t| {
         t.unregister_hotkeys();
         t.remove_icon();
@@ -227,7 +228,7 @@ impl Tray {
         let mut index = matcher::find(&self.config, &fp, self.active.as_deref());
 
         let mut created = None;
-        if index.is_none() && !fp.is_empty() && !self.settings_open {
+        if index.is_none() && !fp.is_empty() && !self.main_window_open {
             let p = matcher::create_for(&self.connected, &self.config);
             created = Some((p.id.clone(), p.name.clone(), describe(&p)));
             self.config.profiles.push(p);
@@ -239,27 +240,27 @@ impl Tray {
         let changed = new_active != self.active;
         self.active = new_active;
 
-        if self.settings_open {
-            settings::update_connection(self.connected.clone(), self.active.clone());
+        if self.main_window_open {
+            main_window::update_connection(self.connected.clone(), self.active.clone());
         }
         self.register_hotkeys(changed);
         self.update_tip();
 
         if let Some((id, name, what)) = created {
             if interactive {
-                self.open_settings(Some(id));
+                self.open_main_window(Some(id));
             } else {
                 self.notify("New display setup detected",
                     &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, Some(Some(id)));
             }
-        } else if changed && !self.settings_open {
+        } else if changed && !self.main_window_open {
             if let Some(p) = self.active_profile() {
                 let text = if p.enabled { format!("{} hotkey(s) active.", p.bindings.len()) } else { "This configuration is disabled. Click to configure.".into() };
                 let (title, id) = (format!("Display setup: {}", p.name), p.id.clone());
                 self.notify(&title, &text, NIIF_NONE, Some(Some(id)));
             }
         } else if interactive && self.active.is_none() {
-            self.open_settings(None);
+            self.open_main_window(None);
         }
     }
 
@@ -279,7 +280,7 @@ impl Tray {
             Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, None),
             Event::ConfigChanged(cfg) => {
                 self.config = cfg;
-                crate::theme::set_choice(self.config.theme);
+                crate::ui::theme::set_choice(self.config.theme);
                 self.save();
                 // Configurations may have been added, deleted or changed: keep the same one active
                 // if it still fits.
@@ -287,8 +288,8 @@ impl Tray {
                 let new_active = index.map(|i| self.config.profiles[i].id.clone());
                 if new_active != self.active {
                     self.active = new_active;
-                    if self.settings_open {
-                        settings::update_connection(self.connected.clone(), self.active.clone());
+                    if self.main_window_open {
+                        main_window::update_connection(self.connected.clone(), self.active.clone());
                     }
                 }
                 self.register_hotkeys(true);
@@ -298,8 +299,8 @@ impl Tray {
                 self.capturing = on;
                 self.register_hotkeys(!on);
             }
-            Event::SettingsClosed => {
-                self.settings_open = false;
+            Event::MainWindowClosed => {
+                self.main_window_open = false;
                 self.capturing = false;
                 self.evaluate(false); // creates a configuration if the setup is now unknown
             }
@@ -371,13 +372,13 @@ impl Tray {
 
     // -------------------------------------------------------------------------------- settings
 
-    fn open_settings(&mut self, select: Option<String>) {
-        if self.settings_open {
-            settings::select_and_focus(select);
+    fn open_main_window(&mut self, select: Option<String>) {
+        if self.main_window_open {
+            main_window::select_and_focus(select);
             return;
         }
-        self.settings_open = true;
-        settings::open(self.config.clone(), self.connected.clone(), self.active.clone(), select.or(self.active.clone()));
+        self.main_window_open = true;
+        main_window::open(self.config.clone(), self.connected.clone(), self.active.clone(), select.or(self.active.clone()));
     }
 
     // -------------------------------------------------------------------------------- tray icon
@@ -514,7 +515,7 @@ impl Tray {
             }
             MenuAction::Configure => {
                 let active = self.active.clone();
-                self.open_settings(active);
+                self.open_main_window(active);
             }
             MenuAction::Redetect => self.evaluate(false),
             MenuAction::ToggleStartup => {

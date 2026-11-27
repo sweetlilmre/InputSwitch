@@ -1,12 +1,14 @@
-//! Owner-drawn buttons and checkboxes in a WinUI-like style: rounded, with hover and pressed
-//! states, an optional Segoe Fluent Icons glyph, and an accent style for the main action.
-//! Checkboxes are drawn too, so their labels stay readable in dark mode (themed Win32 checkboxes
-//! keep black text).
+//! Owner-drawn buttons, checkboxes and toggle switches in a WinUI-like style: rounded, with hover
+//! and pressed states, an optional Segoe Fluent Icons glyph, and an accent style for the main
+//! action. Checkboxes are drawn too, so their labels stay readable in dark mode (themed Win32
+//! checkboxes keep black text).
 //!
 //! Parents must forward WM_DRAWITEM to [`draw`] and call [`clicked`] on BN_CLICKED.
 
+use super::draw;
+use super::theme::{self, Surface};
+use super::Fonts;
 use crate::ffi::*;
-use crate::theme::{self, Surface};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -17,7 +19,10 @@ pub const ICON_EDIT: char = '\u{E70F}';
 pub const ICON_PLAY: char = '\u{E768}';
 pub const ICON_UP: char = '\u{E70E}';
 pub const ICON_DOWN: char = '\u{E70D}';
-const ICON_CHECK: char = '\u{E73E}';
+pub const ICON_MONITOR: char = '\u{E7F4}';
+pub const ICON_TICK: char = '\u{E73E}';
+pub const ICON_WARNING: char = '\u{E7BA}';
+pub const ICON_INFO: char = '\u{E946}';
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -41,32 +46,32 @@ thread_local! {
     static INFO: RefCell<HashMap<HWND, Info>> = RefCell::new(HashMap::new());
 }
 
-fn create(parent: HWND, text: &str, id: i32, kind: Kind, icon: Option<char>, font: HFONT, icon_font: HFONT, surface: Surface) -> HWND {
-    let h = crate::ui::child(parent, "BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, 0, id, font);
+fn create(parent: HWND, text: &str, id: i32, kind: Kind, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
+    let h = super::child(parent, "BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, 0, id, fonts.normal);
     theme::set_surface(h, surface, false);
-    INFO.with(|i| i.borrow_mut().insert(h, Info { kind, icon, checked: false, hot: false, text_font: font, icon_font }));
+    INFO.with(|i| i.borrow_mut().insert(h, Info { kind, icon, checked: false, hot: false, text_font: fonts.normal, icon_font: fonts.icon }));
     unsafe { SetWindowSubclass(h, proc_, 1, 0) };
     h
 }
 
-pub fn button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &crate::ui::Fonts, surface: Surface) -> HWND {
-    create(parent, text, id, Kind::Standard, icon, fonts.normal, fonts.icon, surface)
+pub fn button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::Standard, icon, fonts, surface)
 }
 
-pub fn accent_button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &crate::ui::Fonts, surface: Surface) -> HWND {
-    create(parent, text, id, Kind::Accent, icon, fonts.normal, fonts.icon, surface)
+pub fn accent_button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::Accent, icon, fonts, surface)
 }
 
-pub fn checkbox(parent: HWND, text: &str, id: i32, fonts: &crate::ui::Fonts, surface: Surface) -> HWND {
-    create(parent, text, id, Kind::Check, None, fonts.normal, fonts.icon, surface)
+pub fn checkbox(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::Check, None, fonts, surface)
 }
 
-pub fn switch(parent: HWND, text: &str, id: i32, fonts: &crate::ui::Fonts, surface: Surface) -> HWND {
-    create(parent, text, id, Kind::Switch, None, fonts.normal, fonts.icon, surface)
+pub fn switch(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::Switch, None, fonts, surface)
 }
 
 /// Updates the fonts after a DPI change.
-pub fn set_fonts(h: HWND, fonts: &crate::ui::Fonts) {
+pub fn set_fonts(h: HWND, fonts: &Fonts) {
     INFO.with(|i| {
         if let Some(info) = i.borrow_mut().get_mut(&h) {
             info.text_font = fonts.normal;
@@ -139,10 +144,10 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
     let pressed = dis.itemState & ODS_SELECTED != 0;
     let focused = dis.itemState & ODS_FOCUS != 0 && dis.itemState & ODS_NOFOCUSRECT == 0;
     let dpi = unsafe { GetDpiForWindow(h) }.max(96);
-    let s = |v: i32| crate::ui::scale(v, dpi);
-    let text = crate::ui::get_text(h);
+    let s = |v: i32| super::scale(v, dpi);
+    let text = super::get_text(h);
 
-    theme::fill(hdc, r, theme::color_of(theme::surface_of(h)));
+    draw::fill(hdc, r, theme::color_of(theme::surface_of(h)));
 
     if kind == Kind::Switch {
         // Track: a pill, accent-filled when on. Knob: a circle at the left (off) or right (on).
@@ -156,13 +161,13 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         } else {
             (if hot && !disabled { p.control_hot } else { p.control }, Some(if disabled { p.text_disabled } else { p.text2 }), if disabled { p.text_disabled } else { p.text2 })
         };
-        theme::round_rect(hdc, track, th / 2, track_fill, track_border);
+        draw::round_rect(hdc, track, th / 2, track_fill, track_border);
         let k = s(if hot && !disabled { 14 } else { 12 });
         let kx = if checked { track.right - s(4) - k } else { track.left + s(4) };
         let ky = top + (th - k) / 2;
-        theme::round_rect(hdc, RECT { left: kx, top: ky, right: kx + k, bottom: ky + k }, k / 2, knob, None);
+        draw::round_rect(hdc, RECT { left: kx, top: ky, right: kx + k, bottom: ky + k }, k / 2, knob, None);
         let label = RECT { left: track.right + s(10), top: r.top, right: r.right, bottom: r.bottom };
-        theme::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        draw::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         if focused {
             // Kept inside the control: anything outside is clipped (DPI rounding can push it out by a pixel).
             let ring = RECT {
@@ -171,7 +176,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
                 right: (track.right + s(2)).min(r.right - 1),
                 bottom: (track.bottom + s(2)).min(r.bottom - 1),
             };
-            theme::round_rect(hdc, ring, (ring.bottom - ring.top) / 2, theme::NO_FILL, Some(p.text));
+            draw::round_rect(hdc, ring, (ring.bottom - ring.top) / 2, draw::NO_FILL, Some(p.text));
         }
         return true;
     }
@@ -182,16 +187,16 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         let bx = RECT { left: r.left + s(1), top, right: r.left + s(1) + size, bottom: top + size };
         if checked {
             let fill = if disabled { p.text_disabled } else if hot { p.accent_hot } else { p.accent };
-            theme::round_rect(hdc, bx, s(4), fill, None);
-            theme::text(hdc, &ICON_CHECK.to_string(), bx, icon_font, p.on_accent, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            draw::round_rect(hdc, bx, s(4), fill, None);
+            draw::glyph(hdc, ICON_TICK, bx, icon_font, p.on_accent, DT_CENTER | DT_VCENTER);
         } else {
             let fill = if hot && !disabled { p.control_hot } else { p.control };
-            theme::round_rect(hdc, bx, s(4), fill, Some(if disabled { p.text_disabled } else { p.text2 }));
+            draw::round_rect(hdc, bx, s(4), fill, Some(if disabled { p.text_disabled } else { p.text2 }));
         }
         let label = RECT { left: bx.right + s(8), top: r.top, right: r.right, bottom: r.bottom };
-        theme::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        draw::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         if focused {
-            theme::round_rect(hdc, RECT { left: bx.left - s(1), top: bx.top - s(1), right: bx.right + s(1), bottom: bx.bottom + s(1) }, s(5), theme::NO_FILL, Some(p.text));
+            draw::round_rect(hdc, RECT { left: bx.left - s(1), top: bx.top - s(1), right: bx.right + s(1), bottom: bx.bottom + s(1) }, s(5), draw::NO_FILL, Some(p.text));
         }
         return true;
     }
@@ -205,38 +210,25 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
             Some(p.control_stroke),
         ),
     };
-    theme::round_rect(hdc, r, s(4), fill, border);
+    draw::round_rect(hdc, r, s(4), fill, border);
 
     // Icon and text, centred together.
     let gap = s(8);
-    let text_w = measure(hdc, &text, font);
+    let text_w = draw::text_width(&text, font);
     let icon_w = if icon.is_some() { s(16) } else { 0 };
     let gap = if text.is_empty() { 0 } else { gap }; // icon-only buttons centre the icon
     let total = text_w + if icon.is_some() { icon_w + gap } else { 0 };
     let mut x = r.left + ((r.right - r.left) - total).max(0) / 2;
     if let Some(c) = icon {
-        theme::text(hdc, &c.to_string(), RECT { left: x, top: r.top, right: x + icon_w, bottom: r.bottom }, icon_font, fg, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        draw::glyph(hdc, c, RECT { left: x, top: r.top, right: x + icon_w, bottom: r.bottom }, icon_font, fg, DT_CENTER | DT_VCENTER);
         x += icon_w + gap;
     }
-    theme::text(hdc, &text, RECT { left: x, top: r.top, right: r.right - s(4), bottom: r.bottom }, font, fg, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    draw::text(hdc, &text, RECT { left: x, top: r.top, right: r.right - s(4), bottom: r.bottom }, font, fg, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     if focused {
         let f = RECT { left: r.left + s(2), top: r.top + s(2), right: r.right - s(2), bottom: r.bottom - s(2) };
-        theme::round_rect(hdc, f, s(3), theme::NO_FILL, Some(fg));
+        draw::round_rect(hdc, f, s(3), draw::NO_FILL, Some(fg));
     }
     true
 }
 
-fn measure(hdc: HDC, s: &str, font: HFONT) -> i32 {
-    if s.is_empty() {
-        return 0; // an empty Vec's pointer isn't valid to hand to DrawTextW
-    }
-    let w: Vec<u16> = s.encode_utf16().collect();
-    let mut r = RECT { left: 0, top: 0, right: 10_000, bottom: 1000 };
-    unsafe {
-        let old = SelectObject(hdc, font);
-        DrawTextW(hdc, w.as_ptr(), w.len() as i32, &mut r, 0x0400 /* DT_CALCRECT */ | DT_SINGLELINE | DT_NOPREFIX);
-        SelectObject(hdc, old);
-    }
-    r.right - r.left
-}

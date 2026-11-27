@@ -4,12 +4,14 @@
 use crate::config::{Binding, Profile, ProfileMonitor};
 use crate::ffi::*;
 use crate::hotkey::Hotkey;
-use crate::hotkey_box;
 use crate::monitors;
-use crate::theme::{self, Surface};
-use crate::ui::{self, Fonts};
-use crate::widgets;
-use std::cell::RefCell;
+use crate::ui::dialog::{self, Icon};
+use crate::ui::draw;
+use crate::ui::lists;
+use crate::ui::theme::{self, Surface};
+use crate::ui::{self, widgets, Fonts, Slot};
+
+mod key_box;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 const CLASS: &str = "InputSwitch.Editor";
@@ -46,11 +48,11 @@ struct Editor {
 }
 
 thread_local! {
-    static STATE: RefCell<Option<Editor>> = const { RefCell::new(None) };
+    static STATE: Slot<Editor> = const { Slot::new() };
 }
 
 fn with<R>(f: impl FnOnce(&mut Editor) -> R) -> Option<R> {
-    STATE.with(|s| s.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
+    STATE.with(|s| s.with(f))
 }
 
 /// Shows the editor modally over `owner`. Returns the new or changed binding, or None if cancelled.
@@ -58,22 +60,8 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     static REGISTERED: std::sync::Once = std::sync::Once::new();
     REGISTERED.call_once(|| ui::register_class(CLASS, wndproc, ui::app_icon()));
 
-    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
-    let ex = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-    let mut r = RECT { left: 0, top: 0, right: ui::scale(WIDTH, dpi), bottom: ui::scale(HEIGHT, dpi) };
-    let mut owner_rect = RECT::default();
-    unsafe {
-        AdjustWindowRectExForDpi(&mut r, style, 0, ex, dpi);
-        GetWindowRect(owner, &mut owner_rect);
-    }
-    let (w, h) = (r.right - r.left, r.bottom - r.top);
-    let x = owner_rect.left + ((owner_rect.right - owner_rect.left) - w) / 2;
-    let y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - h) / 2;
     let title = if existing.is_some() { "Edit hotkey" } else { "Add hotkey" };
-    let hwnd = unsafe {
-        CreateWindowExW(ex, wide(CLASS).as_ptr(), wide(title).as_ptr(), style, x, y, w, h, owner, 0, hinstance(), core::ptr::null())
-    };
-    theme::apply_window(hwnd);
+    let hwnd = ui::popup_window(CLASS, title, owner, WIDTH, HEIGHT, dpi);
 
     LAST_FOCUS.store(0, Ordering::Relaxed);
     let fonts = Fonts::new(dpi);
@@ -82,22 +70,17 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     let taken = profile.bindings.iter().filter(|b| Some(&b.id) != existing.map(|e| &e.id)).map(|b| b.hotkey).collect();
     let names: Vec<String> = profile.monitors.iter().map(|m| format!("{}  ·  {}", m.name, m.model)).collect();
     let selected = existing.and_then(|e| profile.monitors.iter().position(|m| m.monitor_id.eq_ignore_ascii_case(&e.monitor_id))).unwrap_or(0);
-    ui::cb_set(c.monitor, &names, selected);
+    lists::cb_set(c.monitor, &names, selected);
 
-    STATE.with(|s| {
-        *s.borrow_mut() = Some(Editor {
-            hwnd, _fonts: fonts, c, monitors: profile.monitors.clone(), taken, existing: existing.cloned(),
-            result: None, dpi, frames,
-        })
-    });
+    STATE.with(|s| s.set(Editor {
+        hwnd, _fonts: fonts, c, monitors: profile.monitors.clone(), taken, existing: existing.cloned(), result: None, dpi, frames,
+    }));
     with(|e| {
         e.fill_inputs();
     });
 
-    ui::modal_loop(owner, hwnd, &|| {
-        STATE.with(|s| s.try_borrow().map(|g| g.as_ref().is_none_or(|e| e.result.is_some())).unwrap_or(false))
-    }, &hotkey_box::is_raw_key);
-    let result = STATE.with(|s| s.borrow_mut().take()).and_then(|e| e.result.flatten());
+    ui::modal_loop(owner, hwnd, &|| STATE.with(|s| s.with(|e| e.result.is_some()).unwrap_or(true)), &key_box::is_raw_key);
+    let result = STATE.with(|s| s.take()).and_then(|e| e.result.flatten());
     unsafe { DestroyWindow(hwnd) };
     result
 }
@@ -113,9 +96,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
         }
         WM_ERASEBKGND => {
             if with(|e| e.paint_background(w as HDC)).is_none() {
-                let mut rc = RECT::default();
-                GetClientRect(h, &mut rc);
-                theme::fill(w as HDC, rc, theme::palette().window);
+                draw::fill(w as HDC, draw::client_rect(h), theme::palette().window);
             }
             return 1;
         }
@@ -142,7 +123,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             return 0;
         }
         WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORBTN => {
-            if let Some(brush) = hotkey_box::ctl_color(w as HDC, l as HWND).or_else(|| theme::ctl_color(m, w as HDC, l as HWND)) {
+            if let Some(brush) = key_box::ctl_color(w as HDC, l as HWND).or_else(|| theme::ctl_color(m, w as HDC, l as HWND)) {
                 return brush;
             }
         }
@@ -175,7 +156,7 @@ static LAST_FOCUS: AtomicIsize = AtomicIsize::new(0);
 fn restore_focus() {
     let mut target = LAST_FOCUS.load(Ordering::Relaxed);
     if target == 0 {
-        target = STATE.with(|s| s.try_borrow().ok().and_then(|g| g.as_ref().map(|e| e.c.monitor))).unwrap_or(0);
+        target = with(|e| e.c.monitor).unwrap_or(0);
     }
     if target != 0 {
         unsafe { SetFocus(target) };
@@ -190,37 +171,37 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
     let (m, w) = (16, WIDTH - 32);
     let mut frames = Vec::new();
 
-    p(ui::label_on(h, "Monitor", f.bold, Surface::Window, false), m, 14, w, 20);
+    p(ui::label(h, "Monitor", f.bold, Surface::Window, false), m, 14, w, 20);
     let monitor = ui::child(h, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_MONITOR, n);
     theme::apply_control(monitor, theme::ControlKind::ComboBox);
     p(monitor, m, 36, w, 240);
 
-    p(ui::label_on(h, "Key combination", f.bold, Surface::Window, false), m, 74, w, 20);
+    p(ui::label(h, "Key combination", f.bold, Surface::Window, false), m, 74, w, 20);
     // The hint under the box says whether it's listening; it wraps onto a second line.
     let hint = ui::child(h, "STATIC", "", SS_NOPREFIX, 0, 0, f.small);
     theme::set_surface(hint, Surface::Window, true);
     p(hint, m, 134, w, 34);
-    let hotkey = hotkey_box::create(h, ID_HOTKEY, n, initial, hint);
+    let hotkey = key_box::create(h, ID_HOTKEY, n, initial, hint);
     frames.push((r(m, 96, w, 32), true));
     p(hotkey, m + 2, 103, w - 4, 20);
 
-    p(ui::label_on(h, "Inputs", f.bold, Surface::Window, false), m, 174, w, 20);
-    p(ui::label_on(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", f.small, Surface::Window, true), m, 196, w, 20);
-    let inputs = ui::listview(h, ID_INPUTS, LVS_NOCOLUMNHEADER, LVS_EX_CHECKBOXES, n);
+    p(ui::label(h, "Inputs", f.bold, Surface::Window, false), m, 174, w, 20);
+    p(ui::label(h, "Tick one to switch to it, two to toggle, more to cycle in the order shown.", f.small, Surface::Window, true), m, 196, w, 20);
+    let inputs = lists::listview(h, ID_INPUTS, LVS_NOCOLUMNHEADER, LVS_EX_CHECKBOXES, n);
     frames.push((r(m, 220, w - 100, 150), false));
     p(inputs, m + 1, 221, w - 102, 148);
-    ui::lv_add_column(inputs, 0, "Input", sc(w - 102 - 24));
+    lists::lv_add_column(inputs, 0, "Input", sc(w - 102 - 24));
     p(widgets::button(h, "Up", ID_UP, Some(widgets::ICON_UP), f, Surface::Window), m + w - 92, 220, 92, 32);
     p(widgets::button(h, "Down", ID_DOWN, Some(widgets::ICON_DOWN), f, Surface::Window), m + w - 92, 258, 92, 32);
 
-    p(ui::label_on(h, "Other input code (hex):", n, Surface::Window, false), m, 389, 150, 20);
+    p(ui::label(h, "Other input code (hex):", n, Surface::Window, false), m, 389, 150, 20);
     let code = ui::child(h, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, 0, ID_CODE, n);
     theme::apply_control(code, theme::ControlKind::Edit);
     frames.push((r(m + 156, 382, 80, 32), false));
     p(code, m + 162, 389, 68, 20);
     p(widgets::button(h, "Add", ID_ADD_CODE, Some(widgets::ICON_ADD), f, Surface::Window), m + 244, 382, 84, 32);
 
-    let summary = ui::label_on(h, "", f.bold, Surface::Window, false);
+    let summary = ui::label(h, "", f.bold, Surface::Window, false);
     p(summary, m, 424, w, 20);
 
     p(widgets::accent_button(h, "Save", IDOK, None, f, Surface::Window), WIDTH - 16 - 100 - 8 - 100, 450, 100, 32);
@@ -232,13 +213,11 @@ impl Editor {
     /// Paints the background and the rounded frames behind the key box, input list and code box.
     fn paint_background(&self, hdc: HDC) {
         let p = theme::palette();
-        let mut rc = RECT::default();
-        unsafe { GetClientRect(self.hwnd, &mut rc) };
-        theme::fill(hdc, rc, p.window);
+        draw::fill(hdc, draw::client_rect(self.hwnd), p.window);
         for &(frame, is_hotkey) in &self.frames {
-            let fill = if is_hotkey { hotkey_box::background() } else { p.control };
-            let border = if is_hotkey && hotkey_box::is_listening() { p.accent } else { p.control_stroke };
-            theme::round_rect(hdc, frame, ui::scale(4, self.dpi), fill, Some(border));
+            let fill = if is_hotkey { key_box::background() } else { p.control };
+            let border = if is_hotkey && key_box::is_listening() { p.accent } else { p.control_stroke };
+            draw::round_rect(hdc, frame, ui::scale(4, self.dpi), fill, Some(border));
         }
     }
 
@@ -258,12 +237,12 @@ impl Editor {
     }
 
     fn selected_monitor(&self) -> Option<&ProfileMonitor> {
-        ui::cb_selected(self.c.monitor).and_then(|i| self.monitors.get(i))
+        lists::cb_selected(self.c.monitor).and_then(|i| self.monitors.get(i))
     }
 
     /// The binding's inputs first (in its order), then the rest of what the monitor offers.
     fn fill_inputs(&mut self) {
-        ui::lv_clear(self.c.inputs);
+        lists::lv_clear(self.c.inputs);
         let Some(m) = self.selected_monitor() else { return };
         let selected: Vec<u8> = match &self.existing {
             Some(b) if b.monitor_id.eq_ignore_ascii_case(&m.monitor_id) => b.inputs.clone(),
@@ -273,23 +252,23 @@ impl Editor {
         let mut codes = selected.clone();
         codes.extend(available.into_iter().filter(|c| !selected.contains(c)));
         for code in codes {
-            let row = ui::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize);
-            ui::lv_set_checked(self.c.inputs, row, selected.contains(&code));
+            let row = lists::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize);
+            lists::lv_set_checked(self.c.inputs, row, selected.contains(&code));
         }
-        ui::lv_fill_last_column(self.c.inputs, 0);
+        lists::lv_fill_last_column(self.c.inputs, 0);
         self.update_summary();
     }
 
     /// Re-applies tick marks (after the checkbox images were rebuilt), keeping the order.
     fn fill_inputs_keeping(&self, checked: &[u8]) {
-        for r in 0..ui::lv_count(self.c.inputs) {
-            let code = ui::lv_param(self.c.inputs, r) as u8;
-            ui::lv_set_checked(self.c.inputs, r, checked.contains(&code));
+        for r in 0..lists::lv_count(self.c.inputs) {
+            let code = lists::lv_param(self.c.inputs, r) as u8;
+            lists::lv_set_checked(self.c.inputs, r, checked.contains(&code));
         }
     }
 
     fn checked_inputs(&self) -> Vec<u8> {
-        (0..ui::lv_count(self.c.inputs)).filter(|&r| ui::lv_checked(self.c.inputs, r)).map(|r| ui::lv_param(self.c.inputs, r) as u8).collect()
+        (0..lists::lv_count(self.c.inputs)).filter(|&r| lists::lv_checked(self.c.inputs, r)).map(|r| lists::lv_param(self.c.inputs, r) as u8).collect()
     }
 
     fn update_summary(&self) {
@@ -302,23 +281,19 @@ impl Editor {
     }
 
     fn move_selected(&mut self, delta: i32) {
-        let Some(i) = ui::lv_selected(self.c.inputs) else { return };
+        let Some(i) = lists::lv_selected(self.c.inputs) else { return };
         let j = i + delta;
-        if j < 0 || j >= ui::lv_count(self.c.inputs) {
+        if j < 0 || j >= lists::lv_count(self.c.inputs) {
             return;
         }
-        let row = |r: i32| (ui::lv_param(self.c.inputs, r) as u8, ui::lv_checked(self.c.inputs, r));
+        let row = |r: i32| (lists::lv_param(self.c.inputs, r) as u8, lists::lv_checked(self.c.inputs, r));
         let (a, b) = (row(i), row(j));
         for (r, (code, on)) in [(i, b), (j, a)] {
-            ui::lv_set_text(self.c.inputs, r, 0, &monitors::long_name(code));
-            let mut item: LVITEMW = zeroed();
-            item.mask = LVIF_PARAM;
-            item.iItem = r;
-            item.lParam = code as isize;
-            unsafe { SendMessageW(self.c.inputs, 0x104C /* LVM_SETITEMW */, 0, &item as *const _ as LPARAM) };
-            ui::lv_set_checked(self.c.inputs, r, on);
+            lists::lv_set_text(self.c.inputs, r, 0, &monitors::long_name(code));
+            lists::lv_set_param(self.c.inputs, r, code as isize);
+            lists::lv_set_checked(self.c.inputs, r, on);
         }
-        ui::lv_select(self.c.inputs, j);
+        lists::lv_select(self.c.inputs, j);
         self.update_summary();
     }
 
@@ -327,20 +302,20 @@ impl Editor {
         let t = text.trim();
         let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
         let Some(code) = u8::from_str_radix(t, 16).ok().filter(|&c| c != 0) else {
-            ui::alert(self.hwnd, ui::Icon::Warning, "Not a valid input code", "Enter a hexadecimal code between 01 and FF, for example 1B.");
+            dialog::alert(self.hwnd, Icon::Warning, "Not a valid input code", "Enter a hexadecimal code between 01 and FF, for example 1B.");
             return;
         };
-        let existing = (0..ui::lv_count(self.c.inputs)).find(|&r| ui::lv_param(self.c.inputs, r) as u8 == code);
-        let row = existing.unwrap_or_else(|| ui::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize));
-        ui::lv_fill_last_column(self.c.inputs, 0); // a scroll bar may have appeared
-        ui::lv_set_checked(self.c.inputs, row, true);
-        ui::lv_select(self.c.inputs, row);
+        let existing = (0..lists::lv_count(self.c.inputs)).find(|&r| lists::lv_param(self.c.inputs, r) as u8 == code);
+        let row = existing.unwrap_or_else(|| lists::lv_add(self.c.inputs, &[monitors::long_name(code)], code as isize));
+        lists::lv_fill_last_column(self.c.inputs, 0); // a scroll bar may have appeared
+        lists::lv_set_checked(self.c.inputs, row, true);
+        lists::lv_select(self.c.inputs, row);
         ui::set_text(self.c.code, "");
         self.update_summary();
     }
 
     fn accept(&mut self) {
-        let hk = hotkey_box::value();
+        let hk = key_box::value();
         let inputs = self.checked_inputs();
         let monitor = self.selected_monitor().map(|m| m.monitor_id.clone());
         // Each problem gets a heading that describes it, rather than one heading for all of them.
@@ -359,21 +334,21 @@ impl Editor {
             None
         };
         if let Some((heading, message)) = problem {
-            ui::alert(self.hwnd, ui::Icon::Warning, &heading, message);
+            dialog::alert(self.hwnd, Icon::Warning, &heading, message);
             return;
         }
 
         // Windows refuses combinations already owned by Windows or another app. (The tray app's
         // own hotkeys are paused while the hotkey editor is open, so they don't count.)
         if self.existing.as_ref().map(|b| b.hotkey) != Some(hk) && !can_register(self.hwnd, hk) {
-            ui::alert(self.hwnd, ui::Icon::Warning, &format!("{} is already in use", hk.display()),
+            dialog::alert(self.hwnd, Icon::Warning, &format!("{} is already in use", hk.display()),
                 "Windows or another app already uses this combination, so InputSwitch can't. Choose another one.");
             return;
         }
         // Some Windows shortcuts are handled before any app sees them, even when registering works.
         if let Some(what) = crate::reserved::windows_use(&hk) {
             let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch.", hk.display());
-            if !ui::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway") {
+            if !dialog::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway") {
                 return;
             }
         }

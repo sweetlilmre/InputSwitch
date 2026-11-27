@@ -66,6 +66,13 @@ pub struct ProfileMonitor {
     pub supported_inputs: Vec<u8>,
 }
 
+impl ProfileMonitor {
+    /// A connected monitor, as it's added to a configuration (its inputs are read later).
+    pub fn from_connected(m: &crate::monitors::MonitorInfo) -> ProfileMonitor {
+        ProfileMonitor { monitor_id: m.id.clone(), name: m.display_name().to_string(), model: m.model.clone(), serial: m.serial.clone(), supported_inputs: Vec::new() }
+    }
+}
+
 /// A hotkey for one monitor: one input switches to it, several are stepped through in order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Binding {

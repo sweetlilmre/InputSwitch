@@ -33,12 +33,17 @@ impl Hotkey {
         if self.is_empty() {
             return "(none)".into();
         }
-        let mut parts = modifier_names(self.mods);
-        parts.push(display_key(self.vk));
-        parts.join(" + ")
+        self.key_names().join(" + ")
     }
 
-    pub fn to_json(&self) -> Json {
+    /// The modifiers and the key, each as written on the key cap ("Ctrl", "Alt", "M").
+    pub fn key_names(&self) -> Vec<String> {
+        let mut parts = modifier_names(self.mods);
+        parts.push(display_key(self.vk));
+        parts
+    }
+
+    pub fn to_json(self) -> Json {
         let mut names = Vec::new();
         for (bit, name) in [(ALT, "Alt"), (CONTROL, "Control"), (SHIFT, "Shift"), (WIN, "Win")] {
             if self.mods & bit != 0 {
