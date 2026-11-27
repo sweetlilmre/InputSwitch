@@ -19,6 +19,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      package:
+        description: Build the Arm64 exe and the release zips too (to test packaging)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,8 +38,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      # Package release files only for pushes to main.
-      PACKAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      # Package release files for pushes to main (or when asked to, on a manual run).
+      PACKAGE: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.package == true }}
       CARGO_TERM_COLOR: always
 
     steps:
