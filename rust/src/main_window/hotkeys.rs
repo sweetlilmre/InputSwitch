@@ -7,6 +7,7 @@ use crate::ui::dialog::{self, Icon};
 use crate::{hotkey_editor, monitors};
 
 impl MainWindow {
+    /// A button was clicked on a hotkey's card.
     pub(super) fn hotkey_action(&mut self, action: Action) {
         match action {
             Action::Test(row) => self.test_hotkey(row),
@@ -15,6 +16,7 @@ impl MainWindow {
         }
     }
 
+    /// Shows the selected configuration's hotkeys in the Hotkeys card.
     pub(super) fn refresh_hotkeys(&mut self) {
         let rows = self.sel.map_or_else(Vec::new, |i| {
             let p = &self.config.profiles[i];
@@ -28,6 +30,7 @@ impl MainWindow {
         self.layout();
     }
 
+    /// "Add hotkey": records a new hotkey in the editor.
     pub(super) fn add_hotkey(&mut self) {
         let Some(i) = self.sel else { return };
         if self.config.profiles[i].monitors.is_empty() {
@@ -57,6 +60,7 @@ impl MainWindow {
         self.refresh_hotkeys();
     }
 
+    /// Removes a hotkey, once confirmed.
     fn remove_hotkey(&mut self, row: usize) {
         let Some(i) = self.sel else { return };
         let Some(b) = self.config.profiles[i].bindings.get(row) else { return };

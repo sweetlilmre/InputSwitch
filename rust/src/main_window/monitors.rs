@@ -8,6 +8,7 @@ use crate::monitors;
 use crate::ui::dialog::{self, Icon};
 
 impl MainWindow {
+    /// Something was done on a monitor's card.
     pub(super) fn monitor_action(&mut self, action: Action) {
         match action {
             Action::Renaming(row) => self.rename_monitor(row),
@@ -16,6 +17,7 @@ impl MainWindow {
         }
     }
 
+    /// Shows the selected configuration's monitors in the Monitors card.
     pub(super) fn refresh_monitors(&mut self) {
         let rows = self.sel.map_or_else(Vec::new, |i| {
             self.config.profiles[i].monitors.iter().map(|m| self.monitor_row(m)).collect()
@@ -24,6 +26,7 @@ impl MainWindow {
         self.layout();
     }
 
+    /// What a monitor's card shows.
     fn monitor_row(&self, m: &ProfileMonitor) -> monitor_cards::Row {
         let connected = self.is_connected(&m.monitor_id);
         let current = self.current.get(&m.monitor_id.to_lowercase()).copied().flatten();
@@ -66,6 +69,7 @@ impl MainWindow {
         self.refresh_hotkeys();
     }
 
+    /// "Add connected": adds the connected external monitors that aren't in the configuration yet.
     pub(super) fn add_connected(&mut self) {
         let Some(i) = self.sel else { return };
         let missing: Vec<ProfileMonitor> = self.connected.iter()
@@ -87,6 +91,7 @@ impl MainWindow {
         self.detect(false);
     }
 
+    /// Removes a monitor and its hotkeys, once confirmed.
     fn remove_monitor(&mut self, row: usize) {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
@@ -161,6 +166,7 @@ impl MainWindow {
         changed
     }
 
+    /// Background detection finished: says how it went, and runs any detection asked for meanwhile.
     pub(super) fn on_detect_done(&mut self) {
         self.detecting = false;
         let missing = self.sel.is_some_and(|i| {

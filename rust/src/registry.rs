@@ -3,6 +3,7 @@
 use crate::ffi::*;
 use core::ptr::{null, null_mut};
 
+/// An open registry key, closed when dropped.
 pub struct RegKey(HKEY);
 
 impl RegKey {
@@ -20,12 +21,14 @@ impl RegKey {
         (rc == 0).then_some(RegKey(key))
     }
 
+    /// Whether the key has a value with this name.
     pub fn exists(&self, name: &str) -> bool {
         unsafe { RegQueryValueExW(self.0, wide(name).as_ptr(), null_mut(), null_mut(), null_mut(), null_mut()) == 0 }
     }
 
+    /// A REG_DWORD value.
     pub fn dword(&self, name: &str) -> Option<u32> {
-        let (mut value, mut len, mut kind) = (0u32, 4u32, 0u32);
+        let (mut value, mut len, mut kind) = (0u32, core::mem::size_of::<u32>() as u32, 0u32);
         let rc = unsafe { RegQueryValueExW(self.0, wide(name).as_ptr(), null_mut(), &mut kind, &mut value as *mut u32 as *mut u8, &mut len) };
         (rc == 0 && kind == REG_DWORD).then_some(value)
     }
@@ -55,6 +58,7 @@ impl RegKey {
         }
     }
 
+    /// Writes a REG_SZ value. False if it couldn't be written.
     pub fn set_string(&self, name: &str, value: &str) -> bool {
         let value = wide(value);
         unsafe { RegSetValueExW(self.0, wide(name).as_ptr(), 0, REG_SZ, value.as_ptr() as *const u8, (value.len() * 2) as u32) == 0 }

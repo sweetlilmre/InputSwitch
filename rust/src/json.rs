@@ -1,5 +1,6 @@
 //! A minimal JSON reader/writer, enough for the settings file. Keeps object key order.
 
+/// A JSON value. Objects keep their members in file order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json {
     Null,
@@ -19,24 +20,32 @@ impl Json {
             _ => None,
         }
     }
+
+    /// A string member, or None if it's missing or not a string.
     pub fn str(&self, key: &str) -> Option<&str> {
         match self.get(key) {
             Some(Json::Str(s)) => Some(s),
             _ => None,
         }
     }
+
+    /// A true/false member, or None if it's missing or not one.
     pub fn bool(&self, key: &str) -> Option<bool> {
         match self.get(key) {
             Some(Json::Bool(b)) => Some(*b),
             _ => None,
         }
     }
+
+    /// An array member's items, or none if it's missing or not an array.
     pub fn arr(&self, key: &str) -> &[Json] {
         match self.get(key) {
             Some(Json::Arr(a)) => a,
             _ => &[],
         }
     }
+
+    /// This value as a number, if it is one.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Json::Num(n) => Some(*n),
@@ -47,6 +56,8 @@ impl Json {
 
 // ------------------------------------------------------------------------------------------ reading
 
+/// Parses a whole document (a leading byte order mark is allowed). The error says what was wrong
+/// and at which byte.
 pub fn parse(text: &str) -> Result<Json, String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut p = Parser { b: text.as_bytes(), i: 0, depth: 0 };
@@ -115,52 +126,56 @@ impl Parser<'_> {
     /// An object or an array.
     fn container(&mut self) -> Result<Json, String> {
         match self.b.get(self.i) {
-            Some(b'{') => {
-                self.i += 1;
-                let mut members = Vec::new();
-                self.ws();
-                if self.b.get(self.i) == Some(&b'}') {
+            Some(b'{') => self.object(),
+            Some(b'[') => self.array(),
+            _ => unreachable!("container() is only called at '{{' or '['"),
+        }
+    }
+
+    fn object(&mut self) -> Result<Json, String> {
+        self.i += 1;
+        let mut members = Vec::new();
+        self.ws();
+        if self.b.get(self.i) == Some(&b'}') {
+            self.i += 1;
+            return Ok(Json::Obj(members));
+        }
+        loop {
+            self.ws();
+            let key = self.string()?;
+            self.eat(b':')?;
+            members.push((key, self.value()?));
+            self.ws();
+            match self.b.get(self.i) {
+                Some(b',') => self.i += 1,
+                Some(b'}') => {
                     self.i += 1;
                     return Ok(Json::Obj(members));
                 }
-                loop {
-                    self.ws();
-                    let key = self.string()?;
-                    self.eat(b':')?;
-                    members.push((key, self.value()?));
-                    self.ws();
-                    match self.b.get(self.i) {
-                        Some(b',') => self.i += 1,
-                        Some(b'}') => {
-                            self.i += 1;
-                            return Ok(Json::Obj(members));
-                        }
-                        _ => return Err(self.err("expected ',' or '}'")),
-                    }
-                }
+                _ => return Err(self.err("expected ',' or '}'")),
             }
-            Some(b'[') => {
-                self.i += 1;
-                let mut items = Vec::new();
-                self.ws();
-                if self.b.get(self.i) == Some(&b']') {
+        }
+    }
+
+    fn array(&mut self) -> Result<Json, String> {
+        self.i += 1;
+        let mut items = Vec::new();
+        self.ws();
+        if self.b.get(self.i) == Some(&b']') {
+            self.i += 1;
+            return Ok(Json::Arr(items));
+        }
+        loop {
+            items.push(self.value()?);
+            self.ws();
+            match self.b.get(self.i) {
+                Some(b',') => self.i += 1,
+                Some(b']') => {
                     self.i += 1;
                     return Ok(Json::Arr(items));
                 }
-                loop {
-                    items.push(self.value()?);
-                    self.ws();
-                    match self.b.get(self.i) {
-                        Some(b',') => self.i += 1,
-                        Some(b']') => {
-                            self.i += 1;
-                            return Ok(Json::Arr(items));
-                        }
-                        _ => return Err(self.err("expected ',' or ']'")),
-                    }
-                }
+                _ => return Err(self.err("expected ',' or ']'")),
             }
-            _ => unreachable!("container() is only called at '{{' or '['"),
         }
     }
 
@@ -205,35 +220,7 @@ impl Parser<'_> {
             match c {
                 b'"' => break,
                 b'\\' => {
-                    let e = *self.b.get(self.i).ok_or_else(|| self.err("bad escape"))?;
-                    self.i += 1;
-                    let ch = match e {
-                        b'"' => '"',
-                        b'\\' => '\\',
-                        b'/' => '/',
-                        b'b' => '\u{8}',
-                        b'f' => '\u{c}',
-                        b'n' => '\n',
-                        b'r' => '\r',
-                        b't' => '\t',
-                        b'u' => {
-                            let mut cp = self.hex4()?;
-                            // A high surrogate pairs with a following low one; anything else is
-                            // left alone (and the lone surrogate becomes U+FFFD).
-                            if (0xD800..0xDC00).contains(&cp) && self.b[self.i..].starts_with(b"\\u") {
-                                let after_high = self.i;
-                                self.i += 2;
-                                let lo = self.hex4()?;
-                                if (0xDC00..0xE000).contains(&lo) {
-                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                                } else {
-                                    self.i = after_high;
-                                }
-                            }
-                            char::from_u32(cp).unwrap_or('\u{fffd}')
-                        }
-                        _ => return Err(self.err("bad escape")),
-                    };
+                    let ch = self.escape()?;
                     let mut buf = [0u8; 4];
                     out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                 }
@@ -241,6 +228,41 @@ impl Parser<'_> {
             }
         }
         String::from_utf8(out).map_err(|_| self.err("invalid UTF-8"))
+    }
+
+    /// The character an escape stands for, read from just after its backslash.
+    fn escape(&mut self) -> Result<char, String> {
+        let e = *self.b.get(self.i).ok_or_else(|| self.err("bad escape"))?;
+        self.i += 1;
+        Ok(match e {
+            b'"' => '"',
+            b'\\' => '\\',
+            b'/' => '/',
+            b'b' => '\u{8}',
+            b'f' => '\u{c}',
+            b'n' => '\n',
+            b'r' => '\r',
+            b't' => '\t',
+            b'u' => self.unicode_escape()?,
+            _ => return Err(self.err("bad escape")),
+        })
+    }
+
+    /// A `\uXXXX` escape, read from just after its `u`. A high surrogate pairs with a following
+    /// low one; anything else is left alone (and the lone surrogate becomes U+FFFD).
+    fn unicode_escape(&mut self) -> Result<char, String> {
+        let mut cp = self.hex4()?;
+        if (0xD800..0xDC00).contains(&cp) && self.b[self.i..].starts_with(b"\\u") {
+            let after_high = self.i;
+            self.i += 2;
+            let lo = self.hex4()?;
+            if (0xDC00..0xE000).contains(&lo) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            } else {
+                self.i = after_high;
+            }
+        }
+        Ok(char::from_u32(cp).unwrap_or('\u{fffd}'))
     }
 }
 
@@ -265,6 +287,7 @@ fn write_value(v: &Json, depth: usize, out: &mut String) {
         Json::Null => out.push_str("null"),
         Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Json::Num(n) => {
+            // Whole numbers without a decimal point, while they're exact as integers.
             if n.fract() == 0.0 && n.abs() < 1e15 {
                 out.push_str(&(*n as i64).to_string());
             } else {

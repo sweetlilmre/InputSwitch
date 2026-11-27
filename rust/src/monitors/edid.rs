@@ -4,14 +4,26 @@
 use crate::ffi::HKEY_LOCAL_MACHINE;
 use crate::registry::RegKey;
 
+/// The parts of an EDID that identify a monitor.
 #[derive(Debug, PartialEq)]
 pub struct Edid {
+    /// The three-letter PnP id, e.g. "DEL".
     pub manufacturer: String,
     pub product: u16,
+    /// The numeric serial field (0 if unused).
     pub serial_number: u32,
+    /// The serial number text descriptor, if there is one.
     pub serial_text: Option<String>,
+    /// The monitor name descriptor, e.g. "DELL P2419H".
     pub model_name: Option<String>,
 }
+
+/// The base EDID block; extension blocks may follow it.
+const BLOCK_LEN: usize = 128;
+/// Where the four 18-byte descriptors start.
+const DESCRIPTORS: [usize; 4] = [54, 72, 90, 108];
+const SERIAL_TAG: u8 = 0xFF;
+const NAME_TAG: u8 = 0xFC;
 
 impl Edid {
     /// The best serial: the text descriptor if there is one, else the numeric field.
@@ -23,22 +35,23 @@ impl Edid {
         }
     }
 
+    /// Reads the identity from the base block. None if it's too short to be an EDID.
     pub fn parse(e: &[u8]) -> Option<Edid> {
-        if e.len() < 128 {
+        if e.len() < BLOCK_LEN {
             return None;
         }
         let manufacturer = decode_pnp(u16::from_be_bytes([e[8], e[9]]));
         let product = u16::from_le_bytes([e[10], e[11]]);
         let serial_number = u32::from_le_bytes([e[12], e[13], e[14], e[15]]);
         let (mut serial_text, mut model_name) = (None, None);
-        // Four 18-byte descriptors; display descriptors start with three zero bytes and a tag.
-        for off in [54usize, 72, 90, 108] {
+        // Display descriptors start with three zero bytes and a tag; their text is bytes 5 to 17.
+        for off in DESCRIPTORS {
             let tag = e[off + 3];
-            if e[off..off + 3] != [0, 0, 0] || (tag != 0xFF && tag != 0xFC) {
+            if e[off..off + 3] != [0, 0, 0] || (tag != SERIAL_TAG && tag != NAME_TAG) {
                 continue;
             }
             let text = descriptor_text(&e[off + 5..off + 18]);
-            if tag == 0xFF { serial_text = Some(text) } else { model_name = Some(text) }
+            if tag == SERIAL_TAG { serial_text = Some(text) } else { model_name = Some(text) }
         }
         Some(Edid { manufacturer, product, serial_number, serial_text, model_name })
     }

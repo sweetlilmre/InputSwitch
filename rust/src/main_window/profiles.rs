@@ -7,18 +7,23 @@ use crate::monitors::MonitorInfo;
 use crate::ui::dialog::{self, Icon};
 use crate::ui::lists;
 
+/// What a configuration with a blank name is called.
 pub(super) const UNNAMED: &str = "Unnamed setup";
+/// The start of a connected configuration's status in the list (draw_profile looks for it).
 pub(super) const CONNECTED: &str = "Connected";
 
 impl MainWindow {
+    /// The id of the configuration shown.
     pub(super) fn selected_id(&self) -> Option<String> {
         self.sel.and_then(|i| self.config.profiles.get(i)).map(|p| p.id.clone())
     }
 
+    /// Whether configuration `index` is the one matching the connected monitors.
     pub(super) fn is_active(&self, index: usize) -> bool {
         self.active.as_deref() == Some(self.config.profiles[index].id.as_str())
     }
 
+    /// The connected monitor with this id (compared ignoring case), if it's connected.
     pub(super) fn connected_monitor(&self, monitor_id: &str) -> Option<&MonitorInfo> {
         self.connected.iter().find(|m| m.id.eq_ignore_ascii_case(monitor_id))
     }
@@ -46,17 +51,19 @@ impl MainWindow {
         let labels: Vec<String> = (0..self.config.profiles.len()).map(|i| self.profile_label(i)).collect();
         self.sel = select
             .and_then(|id| self.config.profiles.iter().position(|p| p.id == id))
-            .or(if labels.is_empty() { None } else { Some(0) });
+            .or((!labels.is_empty()).then_some(0));
         lists::lb_set(self.c.profiles, &labels, self.sel);
         self.show_profile();
     }
 
+    /// Updates the selected configuration's item in the list (after its name or status changed).
     pub(super) fn refresh_profile_label(&self) {
         if let Some(i) = self.sel {
             lists::lb_replace(self.c.profiles, i, &self.profile_label(i));
         }
     }
 
+    /// A configuration was clicked in the list.
     pub(super) fn select_from_list(&mut self) {
         self.sel = lists::lb_selected(self.c.profiles);
         self.show_profile();
@@ -67,26 +74,27 @@ impl MainWindow {
         for h in self.c.detail() {
             ui::enable(h, self.sel.is_some());
         }
-        let Some(i) = self.sel else {
-            ui::set_text(self.c.name.edit, "");
-            widgets::set_checked(self.c.enabled, false);
-            let text = if matcher::fingerprint(&self.connected).is_empty() {
-                "No external monitors are connected. Connect your monitors and a configuration will be created for them automatically."
-            } else {
-                "No configurations yet. Choose \"New from current setup\" to create one for the monitors connected now."
-            };
-            self.set_status(text, Severity::Informational);
-            self.refresh_monitors();
-            self.refresh_hotkeys();
-            return;
-        };
-        let p = &self.config.profiles[i];
-        ui::set_text(self.c.name.edit, &p.name);
-        widgets::set_checked(self.c.enabled, p.enabled);
-        self.update_status();
+        match self.sel {
+            Some(i) => {
+                let p = &self.config.profiles[i];
+                ui::set_text(self.c.name.edit, &p.name);
+                widgets::set_checked(self.c.enabled, p.enabled);
+                self.update_status();
+            }
+            None => {
+                ui::set_text(self.c.name.edit, "");
+                widgets::set_checked(self.c.enabled, false);
+                let text = if matcher::fingerprint(&self.connected).is_empty() {
+                    "No external monitors are connected. Connect your monitors and a configuration will be created for them automatically."
+                } else {
+                    "No configurations yet. Choose \"New from current setup\" to create one for the monitors connected now."
+                };
+                self.set_status(text, Severity::Informational);
+            }
+        }
         self.refresh_monitors();
         self.refresh_hotkeys();
-        self.detect(false);
+        self.detect(false); // does nothing when no configuration is shown
     }
 
     /// The status banner: connected (with hotkeys on or off) or not.
@@ -113,6 +121,7 @@ impl MainWindow {
         unsafe { RedrawWindow(self.hwnd, &r, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
     }
 
+    /// The name box was typed in: keep the name, and save shortly.
     pub(super) fn rename_profile(&mut self) {
         let Some(i) = self.sel else { return };
         self.config.profiles[i].name = ui::get_text(self.c.name.edit);
@@ -120,6 +129,7 @@ impl MainWindow {
         self.commit_soon();
     }
 
+    /// "Hotkeys on" was clicked.
     pub(super) fn toggle_enabled(&mut self) {
         let Some(i) = self.sel else { return };
         self.config.profiles[i].enabled = widgets::checked(self.c.enabled);
@@ -128,6 +138,7 @@ impl MainWindow {
         self.commit();
     }
 
+    /// "New from current setup": a configuration for the monitors connected now, ready to name.
     pub(super) fn new_from_current(&mut self) {
         let fp = matcher::fingerprint(&self.connected);
         if fp.is_empty() {
@@ -152,6 +163,7 @@ impl MainWindow {
         }
     }
 
+    /// "Delete configuration", once confirmed.
     pub(super) fn delete_profile(&mut self) {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];

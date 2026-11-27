@@ -43,8 +43,8 @@ struct Dialog {
     buttons: Vec<HWND>,
     fonts: Fonts,
     dpi: u32,
-    /// The button chosen; Some(None) when dismissed with Esc or the close box.
-    result: Option<Option<usize>>,
+    /// The button chosen (Esc and the close box choose the last one).
+    chosen: Option<usize>,
 }
 
 thread_local! {
@@ -86,15 +86,15 @@ pub fn show(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
         b
     }).collect();
 
-    STATE.with(|st| st.set(Dialog { icon, heading: heading.into(), message: message.into(), buttons: handles.clone(), fonts, dpi, result: None }));
+    STATE.with(|st| st.set(Dialog { icon, heading: heading.into(), message: message.into(), buttons: handles.clone(), fonts, dpi, chosen: None }));
     unsafe {
         MessageBeep(if icon == Icon::Warning { MB_ICONEXCLAMATION } else { MB_ICONASTERISK });
         if let Some(&main_action) = handles.first() {
             SetFocus(main_action);
         }
     }
-    super::modal_loop(owner, hwnd, &|| STATE.with(|s| s.with(|d| d.result.is_some()).unwrap_or(true)), &|_| false);
-    let chosen = STATE.with(|s| s.take()).and_then(|d| d.result.flatten()).unwrap_or(cancel);
+    super::modal_loop(owner, hwnd, &|| STATE.with(|s| s.with(|d| d.chosen.is_some()).unwrap_or(true)), &|_| false);
+    let chosen = STATE.with(|s| s.take()).and_then(|d| d.chosen).unwrap_or(cancel);
     unsafe { DestroyWindow(hwnd) };
     chosen
 }
@@ -138,13 +138,18 @@ impl Dialog {
     }
 
     fn command(&mut self, id: i32, code: u16) {
-        self.result = match id {
+        self.chosen = match id {
             // Enter: the focused button, else the main action.
-            IDOK => Some(Some(self.buttons.iter().position(|&b| b == unsafe { GetFocus() }).unwrap_or(0))),
-            IDCANCEL => Some(None),
-            _ if code == BN_CLICKED && id >= FIRST_BUTTON_ID => Some(Some((id - FIRST_BUTTON_ID) as usize)),
+            IDOK => Some(self.buttons.iter().position(|&b| b == unsafe { GetFocus() }).unwrap_or(0)),
+            IDCANCEL => Some(self.cancel()),
+            _ if code == BN_CLICKED && id >= FIRST_BUTTON_ID => Some((id - FIRST_BUTTON_ID) as usize),
             _ => return,
         };
+    }
+
+    /// What Esc and the close box choose: the last button.
+    fn cancel(&self) -> usize {
+        self.buttons.len().saturating_sub(1)
     }
 }
 
@@ -165,7 +170,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             return 0;
         }
         WM_CLOSE => {
-            with(|d| d.result = Some(None));
+            with(|d| d.chosen = Some(d.cancel()));
             return 0;
         }
         WM_SETTINGCHANGE if theme::is_theme_change(m, l) => {

@@ -22,7 +22,9 @@ use std::collections::HashMap;
 pub struct MonitorInfo {
     /// Stable identity: manufacturer + product code + serial (falls back to the device instance).
     pub id: String,
+    /// The name Windows shows, else the EDID's, else a generic one (see `friendly_name`).
     pub friendly: String,
+    /// Manufacturer and product code, e.g. "DELD0D9".
     pub model: String,
     pub serial: Option<String>,
     /// The laptop's own panel (ignored when matching setups).
@@ -34,6 +36,7 @@ pub struct MonitorInfo {
 }
 
 impl MonitorInfo {
+    /// The friendly name, or the model if there isn't one.
     pub fn display_name(&self) -> &str {
         if self.friendly.trim().is_empty() { &self.model } else { &self.friendly }
     }
@@ -60,7 +63,9 @@ pub fn supported_inputs(m: &MonitorInfo) -> Vec<u8> {
 struct Target {
     gdi: String,
     friendly: String,
+    /// The monitor's device path, which leads to its EDID in the registry.
     path: String,
+    /// The EDID's manufacturer and product codes, as CCD reports them.
     mfg: u16,
     product: u16,
     internal: bool,
@@ -70,7 +75,11 @@ struct Target {
 const INTERNAL_OUTPUTS: [u32; 4] = [0x8000_0000, 6, 11, 13];
 
 fn active_targets() -> Vec<Target> {
-    let mut out = Vec::new();
+    active_paths().iter().filter_map(target_of).collect()
+}
+
+/// The active display paths (empty if Windows wouldn't say).
+fn active_paths() -> Vec<DISPLAYCONFIG_PATH_INFO> {
     unsafe {
         let (mut np, mut nm) = (0u32, 0u32);
         let mut paths = Vec::new();
@@ -78,7 +87,7 @@ fn active_targets() -> Vec<Target> {
         let mut rc = ERROR_INSUFFICIENT_BUFFER;
         for _ in 0..5 {
             if GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut np, &mut nm) != 0 {
-                return out;
+                return Vec::new();
             }
             paths = vec![DISPLAYCONFIG_PATH_INFO::default(); np as usize];
             let mut modes = vec![DISPLAYCONFIG_MODE_INFO { data: [0; 64] }; nm as usize];
@@ -88,39 +97,43 @@ fn active_targets() -> Vec<Target> {
             }
         }
         if rc != 0 {
-            return out;
+            return Vec::new();
         }
-
-        for path in &paths[..np as usize] {
-            let mut source: DISPLAYCONFIG_SOURCE_DEVICE_NAME = zeroed();
-            source.header.type_ = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
-            source.header.size = core::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
-            source.header.adapterId = path.sourceInfo.adapterId;
-            source.header.id = path.sourceInfo.id;
-            if DisplayConfigGetDeviceInfo(&mut source.header) != 0 {
-                continue;
-            }
-
-            let mut target: DISPLAYCONFIG_TARGET_DEVICE_NAME = zeroed();
-            target.header.type_ = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
-            target.header.size = core::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32;
-            target.header.adapterId = path.targetInfo.adapterId;
-            target.header.id = path.targetInfo.id;
-            if DisplayConfigGetDeviceInfo(&mut target.header) != 0 {
-                continue;
-            }
-
-            out.push(Target {
-                gdi: from_wide(&source.viewGdiDeviceName),
-                friendly: from_wide(&target.monitorFriendlyDeviceName),
-                path: from_wide(&target.monitorDevicePath),
-                mfg: target.edidManufactureId,
-                product: target.edidProductCodeId,
-                internal: INTERNAL_OUTPUTS.contains(&target.outputTechnology),
-            });
-        }
+        paths.truncate(np as usize);
+        paths
     }
-    out
+}
+
+/// The source (GDI device) and target (monitor) names of a display path.
+fn target_of(path: &DISPLAYCONFIG_PATH_INFO) -> Option<Target> {
+    unsafe {
+        let mut source: DISPLAYCONFIG_SOURCE_DEVICE_NAME = zeroed();
+        source.header.type_ = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        source.header.size = core::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
+        source.header.adapterId = path.sourceInfo.adapterId;
+        source.header.id = path.sourceInfo.id;
+        if DisplayConfigGetDeviceInfo(&mut source.header) != 0 {
+            return None;
+        }
+
+        let mut target: DISPLAYCONFIG_TARGET_DEVICE_NAME = zeroed();
+        target.header.type_ = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+        target.header.size = core::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32;
+        target.header.adapterId = path.targetInfo.adapterId;
+        target.header.id = path.targetInfo.id;
+        if DisplayConfigGetDeviceInfo(&mut target.header) != 0 {
+            return None;
+        }
+
+        Some(Target {
+            gdi: from_wide(&source.viewGdiDeviceName),
+            friendly: from_wide(&target.monitorFriendlyDeviceName),
+            path: from_wide(&target.monitorDevicePath),
+            mfg: target.edidManufactureId,
+            product: target.edidProductCodeId,
+            internal: INTERNAL_OUTPUTS.contains(&target.outputTechnology),
+        })
+    }
 }
 
 /// The connected, active monitors.
@@ -138,18 +151,23 @@ pub fn enumerate() -> Vec<MonitorInfo> {
             Some(s) => format!("{model}#{s}"),
             None => format!("{model}@{}", edid::device_path_to_instance(&t.path).unwrap_or_else(|| t.gdi.clone())),
         };
-        let friendly = if !t.friendly.trim().is_empty() {
-            t.friendly.clone()
-        } else if let Some(name) = edid.as_ref().and_then(|e| e.model_name.clone()) {
-            name
-        } else if t.internal {
-            "Built-in display".into()
-        } else {
-            model.clone()
-        };
+        let friendly = friendly_name(&t, edid.as_ref(), &model);
         let index = per_device.entry(t.gdi.to_ascii_uppercase()).or_insert(0);
         result.push(MonitorInfo { id, friendly, model, serial, internal: t.internal, gdi: t.gdi, index: *index });
         *index += 1;
     }
     result
+}
+
+/// The name Windows shows, else the EDID's model name, else something generic.
+fn friendly_name(t: &Target, edid: Option<&edid::Edid>, model: &str) -> String {
+    if !t.friendly.trim().is_empty() {
+        t.friendly.clone()
+    } else if let Some(name) = edid.and_then(|e| e.model_name.clone()) {
+        name
+    } else if t.internal {
+        "Built-in display".into()
+    } else {
+        model.to_string()
+    }
 }

@@ -107,8 +107,7 @@ pub fn run(open_main_window: bool) -> i32 {
         t.add_icon();
         t.evaluate(first_run);
         if open_main_window && !main_window::is_open() {
-            let active = t.active.clone();
-            t.open_main_window(active);
+            t.open_on_active();
         }
     });
 
@@ -143,10 +142,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
         WM_TRAY => {
             match loword(l as usize) {
                 NIN_SELECT | NIN_KEYSELECT => {
-                    with(|t| {
-                        let active = t.active.clone();
-                        t.open_main_window(active)
-                    });
+                    with(Tray::open_on_active);
                 }
                 CONTEXT_MENU => show_menu(h, menu_anchor(w)),
                 NIN_BALLOONUSERCLICK => {
@@ -200,19 +196,18 @@ fn menu_anchor(w: WPARAM) -> POINT {
 }
 
 fn show_menu(h: HWND, at: POINT) {
-    let Some((menu, actions)) = with(|t| t.build_menu()) else { return };
+    let Some((menu, mut actions)) = with(|t| t.build_menu()) else { return };
     let cmd = unsafe {
-        let pt = at;
+        // The documented dance so the menu closes when the user clicks elsewhere.
         SetForegroundWindow(h);
-        let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, h, core::ptr::null());
+        let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, at.x, at.y, 0, h, core::ptr::null());
         PostMessageW(h, WM_NULL, 0, 0);
         DestroyMenu(menu);
         cmd
     };
     if cmd <= 0 {
-        return;
+        return; // dismissed
     }
-    let mut actions = actions;
     let action = actions.swap_remove(cmd as usize - 1);
     if matches!(action, MenuAction::Exit) {
         exit(h);
@@ -247,7 +242,7 @@ impl Tray {
         let mut created = None;
         if index.is_none() && !fp.is_empty() && !main_window::is_open() {
             let p = matcher::create_for(&self.connected, &self.config);
-            created = Some((p.id.clone(), p.name.clone(), describe(&p)));
+            created = Some((p.id.clone(), p.name.clone(), describe_monitors(&p)));
             self.config.profiles.push(p);
             self.save();
             index = Some(self.config.profiles.len() - 1);
@@ -365,10 +360,10 @@ impl Tray {
         self.hotkeys = registered;
         let failures = failed.join(", ");
         let news = failures != self.last_failures;
-        self.last_failures = failures;
-        if report && !failed.is_empty() && news {
+        self.last_failures = failures.clone();
+        if report && news && !failures.is_empty() {
             self.notify("Some hotkeys could not be registered",
-                &format!("{} — probably in use by another application.", failed.join(", ")), NIIF_WARNING, OnClick::Open(Some(target)));
+                &format!("{failures} — probably in use by another application."), NIIF_WARNING, OnClick::Open(Some(target)));
         }
     }
 
@@ -396,6 +391,12 @@ impl Tray {
     }
 
     // -------------------------------------------------------------------------------- settings
+
+    /// Opens the main window on the active configuration, or brings it forward and selects that.
+    fn open_on_active(&mut self) {
+        let active = self.active.clone();
+        self.open_main_window(active);
+    }
 
     /// Opens the main window on configuration `select` (or the active one), or brings it forward.
     fn open_main_window(&mut self, select: Option<String>) {
@@ -525,6 +526,7 @@ impl Tray {
         add(menu, MF_STRING, "Exit", Some(MenuAction::Exit));
         (menu, actions)
     }
+
     fn run_menu(&mut self, action: MenuAction) {
         match action {
             MenuAction::Run { profile, binding } => {
@@ -540,10 +542,7 @@ impl Tray {
                     }
                 });
             }
-            MenuAction::Configure => {
-                let active = self.active.clone();
-                self.open_main_window(active);
-            }
+            MenuAction::Configure => self.open_on_active(),
             MenuAction::Redetect => self.evaluate(false),
             MenuAction::ToggleStartup => {
                 if !sys::set_startup(!sys::startup_enabled()) {
@@ -561,6 +560,7 @@ impl Tray {
     }
 }
 
-fn describe(p: &config::Profile) -> String {
+/// The monitor's name, or "2 monitors".
+fn describe_monitors(p: &config::Profile) -> String {
     if p.monitors.len() == 1 { p.monitors[0].name.clone() } else { format!("{} monitors", p.monitors.len()) }
 }

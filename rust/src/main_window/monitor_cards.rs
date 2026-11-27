@@ -48,6 +48,7 @@ pub fn action(id: i32, code: u16) -> Option<Action> {
     }
 }
 
+/// Creates the (empty) list of monitor cards.
 pub fn create(parent: HWND, id: i32, fonts: &std::rc::Rc<crate::ui::Fonts>) -> HWND {
     card_panel::create(parent, id, fonts, MonitorCards { cards: Vec::new() })
 }
@@ -63,6 +64,7 @@ pub fn name_text(panel: HWND, row: usize) -> Option<String> {
     card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| ui::get_text(c.name.edit))).flatten()
 }
 
+/// Replaces what's in a monitor's name box.
 pub fn set_name_text(panel: HWND, row: usize, text: &str) {
     if let Some(h) = card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| c.name.edit)).flatten() {
         ui::set_text(h, text);
@@ -82,19 +84,24 @@ const LINE_H: i32 = 16;
 const CHIP_H: i32 = 22;
 const CHIP_GAP: i32 = 6;
 const PILL_H: i32 = 22;
+/// The pill's padding at each end, and its dot and the gap after it.
+const PILL_PAD: i32 = 10;
+const DOT: i32 = 8;
+const DOT_GAP: i32 = 6;
 const BUTTON_W: i32 = 34;
 
 struct Card {
     row: Row,
     name: TextBox,
     remove: HWND,
-    // Laid out unscrolled, in panel pixels.
+    // Laid out unscrolled, in panel pixels (these four).
     rect: RECT,
     name_frame: RECT,
     chips: Vec<RECT>,
     pill: RECT,
 }
 
+/// The cards, and the controls on them.
 pub struct MonitorCards {
     cards: Vec<Card>,
 }
@@ -139,7 +146,7 @@ impl Cards for MonitorCards {
         let mut y = 0;
         for c in &mut self.cards {
             // Right: the status pill, then the delete button.
-            let pill_w = s(10 + 8 + 6 + 10) + draw::text_width(pill_text(c.row.connected), cx.fonts.small);
+            let pill_w = s(PILL_PAD + DOT + DOT_GAP + PILL_PAD) + draw::text_width(pill_text(c.row.connected), cx.fonts.small);
             let button_x = width - s(PAD_X + BUTTON_W);
             let pill_x = button_x - s(10) - pill_w;
             let top = y + s(PAD_Y);
@@ -153,20 +160,15 @@ impl Cards for MonitorCards {
             let name_w = typed.clamp(s(NAME_MIN_W), s(NAME_MAX_W)).min((right - left).max(s(80)));
             c.name_frame = rect(left, top, name_w, s(NAME_H));
             let mut bottom = c.name_frame.bottom + s(4 + LINE_H);
-            c.chips.clear();
-            if !c.row.chips.is_empty() {
-                let (mut x, mut chip_y) = (left, bottom + s(CHIP_GAP));
-                for (text, _) in &c.row.chips {
-                    let w = draw::text_width(text, cx.fonts.small) + s(20) + 2;
-                    if x > left && x + w > right {
-                        (x, chip_y) = (left, chip_y + s(CHIP_H + CHIP_GAP));
-                    }
-                    c.chips.push(rect(x, chip_y, w, s(CHIP_H)));
-                    x += w + s(CHIP_GAP);
+            if c.row.chips.is_empty() {
+                c.chips.clear();
+                if !c.row.hint.is_empty() {
+                    bottom += s(6 + LINE_H);
                 }
-                bottom = chip_y + s(CHIP_H);
-            } else if !c.row.hint.is_empty() {
-                bottom += s(6 + LINE_H);
+            } else {
+                let (chips, chips_bottom) = wrap_chips(cx, &c.row.chips, left, right, bottom + s(CHIP_GAP));
+                c.chips = chips;
+                bottom = chips_bottom;
             }
             c.rect = RECT { left: 0, top: y, right: width, bottom: bottom + s(PAD_Y) };
             y = c.rect.bottom + s(GAP);
@@ -215,9 +217,9 @@ impl Cards for MonitorCards {
             // The status pill: a dot and the text.
             let (bg, dot) = if c.row.connected { (p.success, p.success_text) } else { (p.neutral, p.text_disabled) };
             draw::round_rect(hdc, pill, s(PILL_H / 2), bg, None);
-            let dot_rect = rect(pill.left + s(10), pill.top + (pill.height() - s(8)) / 2, s(8), s(8));
-            draw::round_rect(hdc, dot_rect, s(4), dot, None);
-            let label = RECT { left: pill.left + s(24), ..pill };
+            let dot_rect = rect(pill.left + s(PILL_PAD), pill.top + (pill.height() - s(DOT)) / 2, s(DOT), s(DOT));
+            draw::round_rect(hdc, dot_rect, s(DOT / 2), dot, None);
+            let label = RECT { left: pill.left + s(PILL_PAD + DOT + DOT_GAP), ..pill };
             draw::text(hdc, pill_text(c.row.connected), label, cx.fonts.small, p.text, DT_VCENTER | DT_SINGLELINE);
         }
     }
@@ -246,4 +248,21 @@ impl Cards for MonitorCards {
             theme::apply_control(c.name.edit, theme::ControlKind::Edit);
         }
     }
+}
+
+/// Lays chips out in rows from (`left`, `top`), wrapping before `right` like a WrapPanel.
+/// Returns where each chip goes, and the bottom of the last row.
+fn wrap_chips(cx: &Ctx, chips: &[(String, bool)], left: i32, right: i32, top: i32) -> (Vec<RECT>, i32) {
+    let s = |v| cx.s(v);
+    let (mut x, mut y) = (left, top);
+    let mut rects = Vec::with_capacity(chips.len());
+    for (text, _) in chips {
+        let w = draw::text_width(text, cx.fonts.small) + s(20) + 2; // padding, and a pixel of border each side
+        if x > left && x + w > right {
+            (x, y) = (left, y + s(CHIP_H + CHIP_GAP));
+        }
+        rects.push(rect(x, y, w, s(CHIP_H)));
+        x += w + s(CHIP_GAP);
+    }
+    (rects, y + s(CHIP_H))
 }

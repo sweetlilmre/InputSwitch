@@ -5,7 +5,14 @@ use super::MonitorInfo;
 use crate::ffi::*;
 use std::sync::Mutex;
 
+/// The MCCS feature that selects the input.
 pub const VCP_INPUT_SOURCE: u8 = 0x60;
+
+/// Reading or setting the input: how many tries, and the pause between them in ms. A monitor
+/// can miss a request, so each is retried.
+const QUICK_TRIES: (u32, u64) = (3, 60);
+/// Reading the capabilities string: how many tries, and the pause between them in ms.
+const CAPABILITIES_TRIES: (u32, u64) = (2, 100);
 
 /// Some monitors misbehave under concurrent requests: one conversation at a time.
 static DDC_LOCK: Mutex<()> = Mutex::new(());
@@ -18,20 +25,21 @@ pub struct Physical {
 impl Physical {
     /// The input the monitor is showing, or None if it didn't answer.
     pub fn current_input(&self) -> Option<u8> {
-        retry(3, 60, || {
+        retry(QUICK_TRIES, || {
             let (mut kind, mut cur, mut max) = (0u32, 0u32, 0u32);
             let ok = unsafe { GetVCPFeatureAndVCPFeatureReply(self.handle, VCP_INPUT_SOURCE, &mut kind, &mut cur, &mut max) } != 0;
-            ok.then_some((cur & 0xFF) as u8)
+            ok.then_some((cur & 0xFF) as u8) // the input is the low byte
         })
     }
 
+    /// Switches the monitor to input `code`. False if it didn't accept.
     pub fn set_input(&self, code: u8) -> bool {
-        retry(3, 60, || (unsafe { SetVCPFeature(self.handle, VCP_INPUT_SOURCE, code as u32) } != 0).then_some(())).is_some()
+        retry(QUICK_TRIES, || (unsafe { SetVCPFeature(self.handle, VCP_INPUT_SOURCE, code as u32) } != 0).then_some(())).is_some()
     }
 
     /// The MCCS capabilities string. Can take a second or two.
     pub fn capabilities(&self) -> Option<String> {
-        retry(2, 100, || unsafe {
+        retry(CAPABILITIES_TRIES, || unsafe {
             let mut len = 0u32;
             if GetCapabilitiesStringLength(self.handle, &mut len) == 0 || len == 0 {
                 return None;
@@ -47,7 +55,7 @@ impl Physical {
 }
 
 /// Tries `f` up to `times` times, pausing `ms` between tries.
-fn retry<T>(times: u32, ms: u64, mut f: impl FnMut() -> Option<T>) -> Option<T> {
+fn retry<T>((times, ms): (u32, u64), mut f: impl FnMut() -> Option<T>) -> Option<T> {
     for attempt in 0..times {
         if let Some(v) = f() {
             return Some(v);

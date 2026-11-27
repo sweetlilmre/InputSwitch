@@ -5,6 +5,7 @@ use crate::json::{self, Json};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Everything in the settings file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppConfig {
     pub profiles: Vec<Profile>,
@@ -67,6 +68,7 @@ pub struct Profile {
     pub bindings: Vec<Binding>,
 }
 
+/// A monitor in a configuration, as it was when added (it needn't be connected now).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProfileMonitor {
     pub monitor_id: String,
@@ -93,9 +95,11 @@ pub struct Binding {
 }
 
 impl Profile {
+    /// The monitor with this id (compared ignoring case), if it's in the configuration.
     pub fn monitor(&self, id: &str) -> Option<&ProfileMonitor> {
         self.monitors.iter().find(|m| m.monitor_id.eq_ignore_ascii_case(id))
     }
+
     pub fn has_monitor(&self, id: &str) -> bool {
         self.monitor(id).is_some()
     }
@@ -103,7 +107,7 @@ impl Profile {
 
 // ------------------------------------------------------------------------------------------ JSON
 
-fn s(v: &str) -> Json {
+fn string(v: &str) -> Json {
     Json::Str(v.to_string())
 }
 
@@ -111,19 +115,27 @@ fn codes(v: &[u8]) -> Json {
     Json::Arr(v.iter().map(|&c| Json::Num(c as f64)).collect())
 }
 
+/// Input codes, skipping anything that isn't one (a hand edit gone wrong).
 fn read_codes(v: &[Json]) -> Vec<u8> {
     v.iter().filter_map(Json::as_f64).filter(|n| (0.0..=255.0).contains(n)).map(|n| n as u8).collect()
 }
 
+/// The date, or now if it's missing or blank: the C# app can't read a blank date.
+fn date_or_now(date: Option<&str>) -> String {
+    date.filter(|d| !d.trim().is_empty()).map_or_else(crate::sys::utc_now, str::to_string)
+}
+
 impl AppConfig {
+    /// The settings in the C# app's format.
     pub fn to_json(&self) -> Json {
         Json::Obj(vec![
             ("Profiles".into(), Json::Arr(self.profiles.iter().map(Profile::to_json).collect())),
             ("ShowNotifications".into(), Json::Bool(self.show_notifications)),
-            ("Theme".into(), s(self.theme.name())),
+            ("Theme".into(), string(self.theme.name())),
         ])
     }
 
+    /// Reads settings forgivingly: anything missing or of the wrong type gets its default.
     pub fn from_json(v: &Json) -> AppConfig {
         AppConfig {
             profiles: v.arr("Profiles").iter().map(Profile::from_json).collect(),
@@ -136,24 +148,12 @@ impl AppConfig {
 impl Profile {
     fn to_json(&self) -> Json {
         Json::Obj(vec![
-            ("Id".into(), s(&self.id)),
-            ("Name".into(), s(&self.name)),
+            ("Id".into(), string(&self.id)),
+            ("Name".into(), string(&self.name)),
             ("Enabled".into(), Json::Bool(self.enabled)),
-            // The C# app can't read a blank date.
-            ("CreatedUtc".into(), if self.created_utc.trim().is_empty() { s(&crate::sys::utc_now()) } else { s(&self.created_utc) }),
-            ("Monitors".into(), Json::Arr(self.monitors.iter().map(|m| Json::Obj(vec![
-                ("MonitorId".into(), s(&m.monitor_id)),
-                ("Name".into(), s(&m.name)),
-                ("Model".into(), s(&m.model)),
-                ("Serial".into(), m.serial.as_deref().map(s).unwrap_or(Json::Null)),
-                ("SupportedInputs".into(), codes(&m.supported_inputs)),
-            ])).collect())),
-            ("Bindings".into(), Json::Arr(self.bindings.iter().map(|b| Json::Obj(vec![
-                ("Id".into(), s(&b.id)),
-                ("MonitorId".into(), s(&b.monitor_id)),
-                ("Hotkey".into(), b.hotkey.to_json()),
-                ("Inputs".into(), codes(&b.inputs)),
-            ])).collect())),
+            ("CreatedUtc".into(), string(&date_or_now(Some(&self.created_utc)))),
+            ("Monitors".into(), Json::Arr(self.monitors.iter().map(ProfileMonitor::to_json).collect())),
+            ("Bindings".into(), Json::Arr(self.bindings.iter().map(Binding::to_json).collect())),
         ])
     }
 
@@ -162,27 +162,58 @@ impl Profile {
             id: v.str("Id").map(str::to_string).unwrap_or_else(crate::sys::new_id),
             name: v.str("Name").unwrap_or("Unnamed setup").to_string(),
             enabled: v.bool("Enabled").unwrap_or(false),
-            // The C# app can't read an empty date, so a missing or blank one becomes "now".
-            created_utc: v.str("CreatedUtc").filter(|s| !s.trim().is_empty()).map(str::to_string).unwrap_or_else(crate::sys::utc_now),
-            monitors: v.arr("Monitors").iter().map(|m| ProfileMonitor {
-                monitor_id: m.str("MonitorId").unwrap_or("").to_string(),
-                name: m.str("Name").unwrap_or("").to_string(),
-                model: m.str("Model").unwrap_or("").to_string(),
-                serial: m.str("Serial").map(str::to_string),
-                supported_inputs: read_codes(m.arr("SupportedInputs")),
-            }).collect(),
-            bindings: v.arr("Bindings").iter().map(|b| Binding {
-                id: b.str("Id").map(str::to_string).unwrap_or_else(crate::sys::new_id),
-                monitor_id: b.str("MonitorId").unwrap_or("").to_string(),
-                hotkey: b.get("Hotkey").map(Hotkey::from_json).unwrap_or_default(),
-                inputs: read_codes(b.arr("Inputs")),
-            }).collect(),
+            created_utc: date_or_now(v.str("CreatedUtc")),
+            monitors: v.arr("Monitors").iter().map(ProfileMonitor::from_json).collect(),
+            bindings: v.arr("Bindings").iter().map(Binding::from_json).collect(),
+        }
+    }
+}
+
+impl ProfileMonitor {
+    fn to_json(&self) -> Json {
+        Json::Obj(vec![
+            ("MonitorId".into(), string(&self.monitor_id)),
+            ("Name".into(), string(&self.name)),
+            ("Model".into(), string(&self.model)),
+            ("Serial".into(), self.serial.as_deref().map(string).unwrap_or(Json::Null)),
+            ("SupportedInputs".into(), codes(&self.supported_inputs)),
+        ])
+    }
+
+    fn from_json(v: &Json) -> ProfileMonitor {
+        ProfileMonitor {
+            monitor_id: v.str("MonitorId").unwrap_or("").to_string(),
+            name: v.str("Name").unwrap_or("").to_string(),
+            model: v.str("Model").unwrap_or("").to_string(),
+            serial: v.str("Serial").map(str::to_string),
+            supported_inputs: read_codes(v.arr("SupportedInputs")),
+        }
+    }
+}
+
+impl Binding {
+    fn to_json(&self) -> Json {
+        Json::Obj(vec![
+            ("Id".into(), string(&self.id)),
+            ("MonitorId".into(), string(&self.monitor_id)),
+            ("Hotkey".into(), self.hotkey.to_json()),
+            ("Inputs".into(), codes(&self.inputs)),
+        ])
+    }
+
+    fn from_json(v: &Json) -> Binding {
+        Binding {
+            id: v.str("Id").map(str::to_string).unwrap_or_else(crate::sys::new_id),
+            monitor_id: v.str("MonitorId").unwrap_or("").to_string(),
+            hotkey: v.get("Hotkey").map(Hotkey::from_json).unwrap_or_default(),
+            inputs: read_codes(v.arr("Inputs")),
         }
     }
 }
 
 // ------------------------------------------------------------------------------------------ file
 
+/// Names a folder to keep the settings in instead of the usual one (the smoke tests use it).
 pub const CONFIG_DIR_VARIABLE: &str = "INPUTSWITCH_CONFIG_DIR";
 
 fn override_dir() -> Option<PathBuf> {
@@ -201,6 +232,7 @@ pub fn dir() -> PathBuf {
     })
 }
 
+/// The settings file, config.json in [`dir`].
 pub fn file_path() -> PathBuf {
     dir().join("config.json")
 }
@@ -214,10 +246,10 @@ fn backup_path() -> PathBuf {
 /// it (so the two apps also keep each other out of the same folder). Empty for the normal location.
 pub fn instance_key() -> String {
     let Some(d) = override_dir() else { return String::new() };
+    const BCRYPT_SHA256_ALG_HANDLE: isize = 0x41;
     let bytes = d.to_string_lossy().to_lowercase().into_bytes();
     let mut hash = [0u8; 32];
-    const BCRYPT_SHA256_ALG_HANDLE: isize = 0x41;
-    unsafe { crate::ffi::BCryptHash(BCRYPT_SHA256_ALG_HANDLE, core::ptr::null(), 0, bytes.as_ptr(), bytes.len() as u32, hash.as_mut_ptr(), 32) };
+    unsafe { crate::ffi::BCryptHash(BCRYPT_SHA256_ALG_HANDLE, core::ptr::null(), 0, bytes.as_ptr(), bytes.len() as u32, hash.as_mut_ptr(), hash.len() as u32) };
     format!("-{}", hash.iter().take(6).map(|b| format!("{b:02X}")).collect::<String>())
 }
 
@@ -250,10 +282,12 @@ pub fn load() -> (AppConfig, Option<String>) {
 
 /// Reads the file, retrying briefly: antivirus and sync tools can hold it open at sign-in.
 fn read_with_retries(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    const RETRIES: u32 = 5;
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(200);
     let mut result = std::fs::read(path);
-    for _ in 0..5 {
+    for _ in 0..RETRIES {
         match &result {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => std::thread::sleep(std::time::Duration::from_millis(200)),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => std::thread::sleep(PAUSE),
             _ => break,
         }
         result = std::fs::read(path);
@@ -279,6 +313,8 @@ fn decode(bytes: &[u8]) -> String {
     }
 }
 
+/// A Windows-1252 byte as a character. Only 0x80–0x9F differ from Latin-1; the five bytes there
+/// that 1252 leaves unassigned keep their Latin-1 control characters.
 fn windows_1252(b: u8) -> char {
     const HIGH: [char; 32] = ['€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}',
         '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ'];
@@ -299,6 +335,7 @@ pub fn save(cfg: &AppConfig) -> std::io::Result<()> {
     std::fs::write(&tmp, json::write(&cfg.to_json()))?;
     std::fs::rename(&tmp, &path)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

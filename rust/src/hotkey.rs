@@ -8,10 +8,17 @@ pub const ALT: u8 = 1;
 pub const CONTROL: u8 = 2;
 pub const SHIFT: u8 = 4;
 pub const WIN: u8 = 8;
+const ALL_MODIFIERS: u8 = ALT | CONTROL | SHIFT | WIN;
 
+/// The modifiers' names in the settings file (.NET `Keys` names), in the order the C# app writes them.
+const FILE_MODIFIERS: [(u8, &str); 4] = [(ALT, "Alt"), (CONTROL, "Control"), (SHIFT, "Shift"), (WIN, "Win")];
+
+/// A key combination. The default (no key) means "none".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Hotkey {
+    /// [`ALT`], [`CONTROL`], [`SHIFT`] and [`WIN`], combined.
     pub mods: u8,
+    /// The virtual-key code, or 0 for none.
     pub vk: u16,
 }
 
@@ -19,6 +26,7 @@ const F13: u16 = 0x7C;
 const F24: u16 = 0x87;
 
 impl Hotkey {
+    /// No key has been chosen.
     pub fn is_empty(&self) -> bool {
         self.vk == 0
     }
@@ -43,44 +51,39 @@ impl Hotkey {
         parts
     }
 
+    /// As the C# app writes it: {"Modifiers": "Alt, Control", "Key": "M"}.
     pub fn to_json(self) -> Json {
-        let mut names = Vec::new();
-        for (bit, name) in [(ALT, "Alt"), (CONTROL, "Control"), (SHIFT, "Shift"), (WIN, "Win")] {
-            if self.mods & bit != 0 {
-                names.push(name);
-            }
-        }
+        let names: Vec<&str> = FILE_MODIFIERS.iter().filter(|(bit, _)| self.mods & bit != 0).map(|(_, name)| *name).collect();
         let mods = if names.is_empty() { "None".to_string() } else { names.join(", ") };
-        let key = if self.vk == 0 { "None".to_string() } else { key_name(self.vk).map(str::to_string).unwrap_or_else(|| self.vk.to_string()) };
+        let key = if self.is_empty() { "None".to_string() } else { key_name(self.vk).map(str::to_string).unwrap_or_else(|| self.vk.to_string()) };
         Json::Obj(vec![("Modifiers".into(), Json::Str(mods)), ("Key".into(), Json::Str(key))])
     }
 
+    /// Reads names (in any case) or numbers, since a .NET enum can be written either way.
     pub fn from_json(v: &Json) -> Hotkey {
-        let mut mods = 0u8;
-        match v.get("Modifiers") {
-            Some(Json::Str(s)) => {
-                for part in s.split(',').map(str::trim) {
-                    mods |= match part.to_ascii_lowercase().as_str() {
-                        "alt" => ALT,
-                        "control" => CONTROL,
-                        "shift" => SHIFT,
-                        "win" => WIN,
-                        n => n.parse::<u8>().unwrap_or(0),
-                    };
-                }
-            }
-            Some(Json::Num(n)) => mods = *n as u8,
-            _ => {}
-        }
+        let mods = match v.get("Modifiers") {
+            Some(Json::Str(s)) => s.split(',').map(|part| parse_modifier(part.trim())).fold(0, |all, m| all | m),
+            Some(Json::Num(n)) => *n as u8,
+            _ => 0,
+        };
         let vk = match v.get("Key") {
             Some(Json::Str(s)) => parse_key(s),
             Some(Json::Num(n)) => *n as u16,
             _ => 0,
         };
-        Hotkey { mods: mods & 0xF, vk }
+        Hotkey { mods: mods & ALL_MODIFIERS, vk }
     }
 }
 
+/// One modifier from the settings file: its name, or its value as a number. Anything else is none.
+fn parse_modifier(s: &str) -> u8 {
+    match FILE_MODIFIERS.iter().find(|(_, name)| name.eq_ignore_ascii_case(s)) {
+        Some(&(bit, _)) => bit,
+        None => s.parse::<u8>().unwrap_or(0),
+    }
+}
+
+/// The modifiers as written on the keys, in the usual order: Ctrl, Alt, Shift, Win.
 fn modifier_names(mods: u8) -> Vec<String> {
     [(CONTROL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift"), (WIN, "Win")]
         .iter()
@@ -123,6 +126,8 @@ const KEY_NAMES: &[(u16, &str)] = &[
     (0xE5, "ProcessKey"), (0xE7, "Packet"), (0xF6, "Attn"), (0xF7, "Crsel"), (0xF8, "Exsel"), (0xF9, "EraseEof"),
     (0xFA, "Play"), (0xFB, "Zoom"), (0xFC, "NoName"), (0xFD, "Pa1"), (0xFE, "OemClear"),
 ];
+
+/// A key's .NET `Keys` name, as written in the settings file.
 fn key_name(vk: u16) -> Option<&'static str> {
     match vk {
         0x30..=0x39 => Some(["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9"][(vk - 0x30) as usize]),
@@ -136,6 +141,7 @@ fn key_name(vk: u16) -> Option<&'static str> {
     }
 }
 
+/// A key from the settings file: a `Keys` name (any case) or a number. Anything else is none.
 fn parse_key(s: &str) -> u16 {
     let s = s.trim();
     if s.eq_ignore_ascii_case("none") || s.is_empty() {
@@ -144,6 +150,7 @@ fn parse_key(s: &str) -> u16 {
     if let Ok(n) = s.parse::<u16>() {
         return n;
     }
+    // The ranges key_name spells out (digits, letters, number pad, F-keys), then the table.
     for vk in (0x30..=0x39).chain(0x41..=0x5A).chain(0x60..=0x69).chain(0x70..=0x87) {
         if key_name(vk).is_some_and(|n| n.eq_ignore_ascii_case(s)) {
             return vk;

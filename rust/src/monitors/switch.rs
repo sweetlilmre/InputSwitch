@@ -45,6 +45,7 @@ pub fn switch_to(m: &MonitorInfo, input: u8) -> Result<u8, String> {
     finish(m, switched, input)
 }
 
+/// Remembers a switch that worked, or explains one that didn't.
 fn finish(m: &MonitorInfo, switched: Option<u8>, attempted: u8) -> Result<u8, String> {
     match switched {
         Some(input) => {

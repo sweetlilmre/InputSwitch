@@ -249,15 +249,23 @@ pub fn apply_control(h: HWND, kind: ControlKind) {
     }
 }
 
-
-/// Records what a control sits on, and whether its text is secondary (greyer).
+/// Records what a control sits on, and whether its text is secondary (greyer). It's forgotten
+/// when the control is destroyed.
 pub fn set_surface(h: HWND, surface: Surface, secondary: bool) {
-    STYLES.with(|s| s.borrow_mut().insert(h, Style { surface, secondary }));
+    let first = STYLES.with(|s| s.borrow_mut().insert(h, Style { surface, secondary }).is_none());
+    if first {
+        unsafe { SetWindowSubclass(h, forget_on_destroy, FORGET_SUBCLASS_ID, 0) };
+    }
 }
 
-/// Forgets a destroyed control's surface.
-pub fn forget(h: HWND) {
-    STYLES.with(|s| s.borrow_mut().remove(&h));
+const FORGET_SUBCLASS_ID: usize = 0x5446; // "TF": theme, forget
+
+unsafe extern "system" fn forget_on_destroy(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    if m == WM_NCDESTROY {
+        STYLES.with(|s| s.borrow_mut().remove(&h));
+        RemoveWindowSubclass(h, forget_on_destroy, FORGET_SUBCLASS_ID);
+    }
+    DefSubclassProc(h, m, w, l)
 }
 
 fn style_of(h: HWND) -> Option<Style> {

@@ -38,21 +38,27 @@ pub fn find(config: &AppConfig, fp: &HashSet<String>, current: Option<&str>) -> 
 
 /// A new configuration for the connected external monitors, hotkeys off, with a unique name.
 pub fn create_for(monitors: &[MonitorInfo], config: &AppConfig) -> Profile {
-    let base = format!("Setup {}", config.profiles.len() + 1);
-    let mut name = base.clone();
-    let mut n = 2;
-    while config.profiles.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
-        name = format!("{base} ({n})");
-        n += 1;
-    }
     Profile {
         id: crate::sys::new_id(),
-        name,
+        name: unique_name(config),
         enabled: false,
         created_utc: crate::sys::utc_now(),
         monitors: monitors.iter().filter(|m| !m.internal).map(ProfileMonitor::from_connected).collect(),
         bindings: Vec::new(),
     }
+}
+
+/// "Setup 3" for a third configuration, or "Setup 3 (2)" and so on if that name is taken.
+fn unique_name(config: &AppConfig) -> String {
+    let base = format!("Setup {}", config.profiles.len() + 1);
+    let taken = |name: &str| config.profiles.iter().any(|p| p.name.eq_ignore_ascii_case(name));
+    let mut name = base.clone();
+    let mut n = 2;
+    while taken(&name) {
+        name = format!("{base} ({n})");
+        n += 1;
+    }
+    name
 }
 
 #[cfg(test)]

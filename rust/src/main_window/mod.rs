@@ -30,7 +30,7 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use theme::Severity;
 
 const CLASS: &str = "InputSwitch.MainWindow";
-/// Commits typed names once typing pauses, rather than on every keystroke.
+/// Commits typed names once typing pauses for TYPING_MS, rather than on every keystroke.
 const TIMER_TYPING: usize = 1;
 const TYPING_MS: u32 = 700;
 
@@ -46,15 +46,18 @@ enum Update {
     Theme,
     /// The window moved to a monitor with another DPI.
     Dpi { dpi: u32, suggested: RECT },
-    /// Background work: a monitor's inputs were read, all of them were, or a test switched one.
+    /// Background work read a monitor's inputs and its current input.
     Detected { id: String, inputs: Vec<u8>, current: Option<u8> },
+    /// Background work has read every monitor it was asked to.
     DetectDone,
+    /// A hotkey's Test button switched a monitor (or failed to).
     Tested { id: String, result: Result<u8, String> },
 }
 
 static MAIL: Mailbox<Update> = Mailbox::new();
 static HWND_MAIN: AtomicIsize = AtomicIsize::new(0);
 
+/// The window's state, kept in [`STATE`] while it's open.
 struct MainWindow {
     hwnd: HWND,
     dpi: u32,
@@ -73,6 +76,7 @@ struct MainWindow {
     current: HashMap<String, Option<u8>>,
     /// Monitors whose inputs have been read this session (lower-case ids).
     attempted: HashSet<String>,
+    /// Inputs are being read in the background.
     detecting: bool,
     /// A detection asked for while one was running (its `force`); it runs when that one finishes.
     detect_queued: Option<bool>,
@@ -95,6 +99,7 @@ pub fn hwnd() -> HWND {
     HWND_MAIN.load(Ordering::Relaxed)
 }
 
+/// Whether the window is open.
 pub fn is_open() -> bool {
     hwnd() != 0
 }
@@ -305,6 +310,7 @@ impl MainWindow {
         false
     }
 
+    /// Applies everything that arrived in the mailbox, then saves once if detection changed anything.
     fn apply_updates(&mut self) {
         let mut inputs_changed = false;
         for update in MAIL.take() {

@@ -4,6 +4,7 @@
 
 use crate::hotkey::{Hotkey, ALT, CONTROL, SHIFT, WIN};
 
+/// One table entry: the modifiers, the key and what Windows uses the combination for.
 const fn k(mods: u8, vk: u8, what: &'static str) -> (u8, u16, &'static str) {
     (mods, vk as u16, what)
 }
@@ -25,6 +26,7 @@ const COMMA: u8 = 0xBC;
 const PERIOD: u8 = 0xBE;
 const SEMICOLON: u8 = 0xBA;
 const F4: u8 = 0x73;
+const DIGITS: std::ops::RangeInclusive<u16> = 0x30..=0x39;
 
 const SHORTCUTS: &[(u8, u16, &str)] = &[
     // Win + key
@@ -60,7 +62,7 @@ const SHORTCUTS: &[(u8, u16, &str)] = &[
 /// What Windows uses this combination for, if it's a known Windows shortcut. Digits with Win
 /// (with or without Shift, Ctrl or Alt) open or switch taskbar apps.
 pub fn windows_use(h: &Hotkey) -> Option<&'static str> {
-    if h.mods & WIN != 0 && (0x30..=0x39).contains(&h.vk) {
+    if h.mods & WIN != 0 && DIGITS.contains(&h.vk) {
         return Some("taskbar apps");
     }
     SHORTCUTS.iter().find(|(m, vk, _)| *m == h.mods && *vk == h.vk).map(|(_, _, what)| *what)

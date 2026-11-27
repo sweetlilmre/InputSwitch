@@ -24,8 +24,11 @@ const LABEL_H: i32 = 20;
 const PROFILE_ITEM_H: i32 = 52;
 
 // Areas.
+/// The configurations list and the buttons under it: their left edge and width.
+const NAV_X: i32 = 12;
 const NAV_W: i32 = 236;
 const MARGIN: i32 = 24;
+const BANNER_Y: i32 = 64;
 const BANNER_H: i32 = 46;
 /// The Monitors and Hotkeys cards: a title and subtitle, then the cards.
 const CARD_HEADER: i32 = 66;
@@ -56,6 +59,7 @@ pub(super) fn create_window(class: &str) -> HWND {
     hwnd
 }
 
+/// The smallest the window can be made, in pixels for its DPI.
 pub(super) fn min_window_size(h: HWND) -> POINT {
     let dpi = ui::dpi_of(h);
     let mut r = rect(0, 0, ui::scale(MIN_WIDTH, dpi), ui::scale(MIN_HEIGHT, dpi));
@@ -63,10 +67,12 @@ pub(super) fn min_window_size(h: HWND) -> POINT {
     POINT { x: r.width(), y: r.height() }
 }
 
+/// The height of an item in the configurations list, in pixels.
 pub(super) fn profile_item_height(dpi: u32) -> i32 {
     ui::scale(PROFILE_ITEM_H, dpi)
 }
 
+/// The window's controls (the cards' own controls belong to the card panels).
 pub(super) struct Controls {
     pub configs_label: HWND,
     pub profiles: HWND,
@@ -104,22 +110,21 @@ impl Controls {
 
     /// Gives every control its font (on creation, and after a DPI change).
     fn set_fonts(&self, f: &Rc<Fonts>) {
-        let c = self;
         let fonts = [
-            (c.configs_label, f.section), (c.profiles, f.normal), (c.new, f.normal), (c.delete, f.normal), (c.version, f.small),
-            (c.name_label, f.normal), (c.status, f.normal), (c.enabled, f.normal),
-            (c.monitors_label, f.section), (c.monitors_hint, f.normal), (c.detect, f.normal), (c.add_connected, f.normal),
-            (c.hotkeys_label, f.section), (c.hotkeys_hint, f.normal), (c.add_hotkey, f.normal),
-            (c.activity, f.small), (c.saved_note, f.small), (c.startup, f.normal), (c.notify, f.normal), (c.dark, f.normal),
-            (c.close, f.normal),
+            (self.configs_label, f.section), (self.profiles, f.normal), (self.new, f.normal), (self.delete, f.normal), (self.version, f.small),
+            (self.name_label, f.normal), (self.status, f.normal), (self.enabled, f.normal),
+            (self.monitors_label, f.section), (self.monitors_hint, f.normal), (self.detect, f.normal), (self.add_connected, f.normal),
+            (self.hotkeys_label, f.section), (self.hotkeys_hint, f.normal), (self.add_hotkey, f.normal),
+            (self.activity, f.small), (self.saved_note, f.small), (self.startup, f.normal), (self.notify, f.normal), (self.dark, f.normal),
+            (self.close, f.normal),
         ];
         for (h, font) in fonts {
             ui::set_font(h, font);
             widgets::set_fonts(h, f);
         }
-        c.name.set_font(f.title, f);
-        ui::card_panel::set_fonts(c.monitors, f);
-        ui::card_panel::set_fonts(c.hotkeys, f);
+        self.name.set_font(f.title, f);
+        ui::card_panel::set_fonts(self.monitors, f);
+        ui::card_panel::set_fonts(self.hotkeys, f);
     }
 }
 
@@ -180,95 +185,130 @@ pub(super) struct Regions {
 }
 
 impl MainWindow {
+    /// Places every control for the window's size. Positions are worked out at 96 DPI.
     pub(super) fn layout(&mut self) {
         let rc = draw::client_rect(self.hwnd);
         let d = self.dpi as i32;
         let (w, h) = (rc.right * 96 / d, rc.bottom * 96 / d);
-        let sc = |v: i32| ui::scale(v, self.dpi);
-        let p = |hw: HWND, x: i32, y: i32, cw: i32, ch: i32| ui::place(hw, sc(x), sc(y), sc(cw), sc(ch));
-        let r = |x: i32, y: i32, cw: i32, ch: i32| rect(sc(x), sc(y), sc(cw), sc(ch));
-        let c = &self.c;
-
-        // Left: the configurations, on the window background.
-        let (nav_x, list_x) = (16, 12);
-        p(c.configs_label, nav_x, 16, NAV_W, 26);
-        let version_y = h - 14 - 18;
-        let delete_y = version_y - 10 - BUTTON_H;
-        let new_y = delete_y - 6 - BUTTON_H;
-        p(c.profiles, list_x, 50, NAV_W, new_y - 10 - 50);
-        p(c.new, list_x, new_y, NAV_W, BUTTON_H);
-        p(c.delete, list_x, delete_y, NAV_W, BUTTON_H);
-        p(c.version, nav_x, version_y, NAV_W, 18);
+        self.layout_nav(h);
 
         // Right: the selected configuration, on the content layer.
-        let layer_x = list_x + NAV_W + 12;
+        let layer_x = NAV_X + NAV_W + 12;
         let (left, right) = (layer_x + MARGIN, w - MARGIN);
-        let width = right - left;
-        let layer = r(layer_x, 0, w - layer_x, h);
-
-        let name_label_w = 48;
-        p(c.name_label, left, 25, name_label_w, LABEL_H);
-        let name_frame = r(left + name_label_w + 4, 12, width - name_label_w - 4, 44);
-        c.name.place(name_frame, self.dpi);
-
-        // The status banner: an icon and the status on the left, "Hotkeys on" on the right.
-        let (banner_y, enabled_w) = (64, 130);
-        let banner = r(left, banner_y, width, BANNER_H);
-        let status_x = left + 16 + 28;
-        p(c.status, status_x, banner_y + 13, right - 16 - enabled_w - 4 - status_x, LABEL_H);
-        p(c.enabled, right - 16 - enabled_w, banner_y + (BANNER_H - CHECK_H) / 2, enabled_w, CHECK_H);
-
-        // The footer: what's happening, then the options and Close.
-        let bottom = h - 16 - BUTTON_H;
-        let note_w = 220;
-        p(c.activity, left, bottom - 28, width - note_w - 10, LABEL_H);
-        p(c.saved_note, right - note_w, bottom - 28, note_w, LABEL_H);
-        let check_y = bottom + (BUTTON_H - CHECK_H) / 2;
-        for (check, x, check_w) in [(c.startup, 0, 160), (c.notify, 166, 230), (c.dark, 412, 130)] {
-            p(check, left + x, check_y, check_w, CHECK_H);
-        }
-        p(c.close, right - 100, bottom, 100, BUTTON_H);
-
-        // The two cards, each with a title, a subtitle and buttons on the right, then its cards.
-        // Each is as tall as its cards need, beyond which they scroll; Monitors leaves room for
-        // Hotkeys. The cards' height depends on the width, so that's set first, keeping the
-        // panel's height (resizing it when nothing has changed would repaint every card).
-        let (top, end, gap) = (banner_y + BANNER_H + 16, bottom - 40, 16);
-        let (cx, cw) = (left + CARD_PAD, width - 2 * CARD_PAD);
-        let card_height = |panel: HWND, y: i32, max: i32| {
-            ui::place(panel, sc(cx), sc(y + CARD_HEADER), sc(cw), window_height(panel));
-            (CARD_HEADER + card_panel_height(panel) + CARD_PAD).min(max)
-        };
-        // A card's title and subtitle, with its buttons (rightmost last) along the right.
-        let header = |y: i32, title: HWND, subtitle: HWND, buttons: &[(HWND, i32)]| {
-            let buttons_w: i32 = buttons.iter().map(|(_, bw)| bw + 8).sum();
-            p(title, cx, y + 12, cw - buttons_w - 10, 26);
-            p(subtitle, cx, y + 40, cw - buttons_w - 10, LABEL_H);
-            let mut x = cx + cw - buttons_w + 8;
-            for &(button, bw) in buttons {
-                p(button, x, y + 16, bw, BUTTON_H);
-                x += bw + 8;
-            }
-        };
-
-        let monitors_h = card_height(c.monitors, top, end - top - gap - HOTKEYS_MIN).max(CARD_HEADER + 60);
-        header(top, c.monitors_label, c.monitors_hint, &[(c.detect, 140), (c.add_connected, 150)]);
-        p(c.monitors, cx, top + CARD_HEADER, cw, monitors_h - CARD_HEADER - CARD_PAD);
-
-        let hy = top + monitors_h + gap;
-        let hotkeys_h = card_height(c.hotkeys, hy, end - hy).max(CARD_HEADER + 50);
-        header(hy, c.hotkeys_label, c.hotkeys_hint, &[(c.add_hotkey, 130)]);
-        p(c.hotkeys, cx, hy + CARD_HEADER, cw, hotkeys_h - CARD_HEADER - CARD_PAD);
+        let layer = self.scaled_rect(layer_x, 0, w - layer_x, h);
+        let name_frame = self.layout_name(left, right);
+        let banner = self.layout_banner(left, right);
+        let bottom = self.layout_footer(left, right, h);
+        let cards = self.layout_cards(left, right, BANNER_Y + BANNER_H + 16, bottom - 40);
 
         // Repaint only if something moved (all children too: moved controls otherwise keep stale
         // pixels copied from where they were). Repainting when nothing moved makes everything flicker.
-        let regions = Regions { layer, banner, cards: [r(left, top, width, monitors_h), r(left, hy, width, hotkeys_h)], name_frame };
+        let regions = Regions { layer, banner, cards, name_frame };
         if regions != self.regions {
             self.regions = regions;
             unsafe { RedrawWindow(self.hwnd, core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
         }
     }
 
+    /// Left: the configurations, on the window background.
+    fn layout_nav(&self, h: i32) {
+        let c = &self.c;
+        let label_x = 16;
+        self.place(c.configs_label, label_x, 16, NAV_W, 26);
+        let version_y = h - 14 - 18;
+        let delete_y = version_y - 10 - BUTTON_H;
+        let new_y = delete_y - 6 - BUTTON_H;
+        self.place(c.profiles, NAV_X, 50, NAV_W, new_y - 10 - 50);
+        self.place(c.new, NAV_X, new_y, NAV_W, BUTTON_H);
+        self.place(c.delete, NAV_X, delete_y, NAV_W, BUTTON_H);
+        self.place(c.version, label_x, version_y, NAV_W, 18);
+    }
+
+    /// The name box along the top, with its label. Returns the box's frame.
+    fn layout_name(&self, left: i32, right: i32) -> RECT {
+        let label_w = 48;
+        self.place(self.c.name_label, left, 25, label_w, LABEL_H);
+        let frame = self.scaled_rect(left + label_w + 4, 12, right - left - label_w - 4, 44);
+        self.c.name.place(frame, self.dpi);
+        frame
+    }
+
+    /// The status banner: an icon and the status on the left, "Hotkeys on" on the right.
+    fn layout_banner(&self, left: i32, right: i32) -> RECT {
+        let enabled_w = 130;
+        let status_x = left + 16 + 28;
+        self.place(self.c.status, status_x, BANNER_Y + 13, right - 16 - enabled_w - 4 - status_x, LABEL_H);
+        self.place(self.c.enabled, right - 16 - enabled_w, BANNER_Y + (BANNER_H - CHECK_H) / 2, enabled_w, CHECK_H);
+        self.scaled_rect(left, BANNER_Y, right - left, BANNER_H)
+    }
+
+    /// The footer: what's happening, then the options and Close. Returns where the buttons start.
+    fn layout_footer(&self, left: i32, right: i32, h: i32) -> i32 {
+        let c = &self.c;
+        let bottom = h - 16 - BUTTON_H;
+        let note_w = 220;
+        self.place(c.activity, left, bottom - 28, right - left - note_w - 10, LABEL_H);
+        self.place(c.saved_note, right - note_w, bottom - 28, note_w, LABEL_H);
+        let check_y = bottom + (BUTTON_H - CHECK_H) / 2;
+        for (check, x, check_w) in [(c.startup, 0, 160), (c.notify, 166, 230), (c.dark, 412, 130)] {
+            self.place(check, left + x, check_y, check_w, CHECK_H);
+        }
+        self.place(c.close, right - 100, bottom, 100, BUTTON_H);
+        bottom
+    }
+
+    /// The two cards between `top` and `end`, each with a title, a subtitle and buttons on the
+    /// right, then its cards. Each is as tall as its cards need, beyond which they scroll;
+    /// Monitors leaves room for Hotkeys. Returns the two cards' rectangles.
+    fn layout_cards(&self, left: i32, right: i32, top: i32, end: i32) -> [RECT; 2] {
+        let c = &self.c;
+        let width = right - left;
+        let gap = 16;
+        let (cx, cw) = (left + CARD_PAD, width - 2 * CARD_PAD);
+        // The cards' height depends on the width, so that's set first, keeping the panel's
+        // height (resizing it when nothing has changed would repaint every card).
+        let card_height = |panel: HWND, y: i32, max: i32| {
+            let sc = |v: i32| ui::scale(v, self.dpi);
+            ui::place(panel, sc(cx), sc(y + CARD_HEADER), sc(cw), window_height(panel));
+            (CARD_HEADER + card_panel_height(panel) + CARD_PAD).min(max)
+        };
+        // A card's title and subtitle, with its buttons (rightmost last) along the right.
+        let header = |y: i32, title: HWND, subtitle: HWND, buttons: &[(HWND, i32)]| {
+            let buttons_w: i32 = buttons.iter().map(|(_, bw)| bw + 8).sum();
+            self.place(title, cx, y + 12, cw - buttons_w - 10, 26);
+            self.place(subtitle, cx, y + 40, cw - buttons_w - 10, LABEL_H);
+            let mut x = cx + cw - buttons_w + 8;
+            for &(button, bw) in buttons {
+                self.place(button, x, y + 16, bw, BUTTON_H);
+                x += bw + 8;
+            }
+        };
+
+        let monitors_h = card_height(c.monitors, top, end - top - gap - HOTKEYS_MIN).max(CARD_HEADER + 60);
+        header(top, c.monitors_label, c.monitors_hint, &[(c.detect, 140), (c.add_connected, 150)]);
+        self.place(c.monitors, cx, top + CARD_HEADER, cw, monitors_h - CARD_HEADER - CARD_PAD);
+
+        let hy = top + monitors_h + gap;
+        let hotkeys_h = card_height(c.hotkeys, hy, end - hy).max(CARD_HEADER + 50);
+        header(hy, c.hotkeys_label, c.hotkeys_hint, &[(c.add_hotkey, 130)]);
+        self.place(c.hotkeys, cx, hy + CARD_HEADER, cw, hotkeys_h - CARD_HEADER - CARD_PAD);
+
+        [self.scaled_rect(left, top, width, monitors_h), self.scaled_rect(left, hy, width, hotkeys_h)]
+    }
+
+    /// Places a control, given its position and size at 96 DPI.
+    fn place(&self, control: HWND, x: i32, y: i32, w: i32, h: i32) {
+        let s = |v: i32| ui::scale(v, self.dpi);
+        ui::place(control, s(x), s(y), s(w), s(h));
+    }
+
+    /// A rectangle given at 96 DPI, in pixels.
+    fn scaled_rect(&self, x: i32, y: i32, w: i32, h: i32) -> RECT {
+        let s = |v: i32| ui::scale(v, self.dpi);
+        rect(s(x), s(y), s(w), s(h))
+    }
+
+    /// Paints what's behind the controls: the content layer, the cards, the banner and the name box's frame.
     pub(super) fn paint_background(&self, hdc: HDC) {
         let p = theme::palette();
         let g = &self.regions;
@@ -310,6 +350,7 @@ impl MainWindow {
         theme::repaint(self.hwnd);
     }
 
+    /// The window moved to a monitor with another DPI: new fonts, then Windows' suggested size.
     pub(super) fn dpi_changed(&mut self, dpi: u32, suggested: RECT) {
         self.dpi = dpi;
         self.fonts = Rc::new(Fonts::new(dpi)); // the old ones go once nothing uses them
@@ -329,6 +370,7 @@ thread_local! {
     static LIST_FONTS: RefCell<Option<Rc<Fonts>>> = const { RefCell::new(None) };
 }
 
+/// Sets the fonts the configurations list is drawn with.
 pub(super) fn set_list_fonts(fonts: &Rc<Fonts>) {
     LIST_FONTS.with(|f| *f.borrow_mut() = Some(fonts.clone()));
 }
@@ -349,14 +391,14 @@ pub(super) fn draw_profile(dis: &DRAWITEMSTRUCT) {
 
     draw::fill(hdc, r, p.window);
     let item = r.inset(s(2), s(2));
+    let mid = (item.top + item.bottom) / 2;
     if dis.itemState & ODS_SELECTED != 0 {
         draw::round_rect(hdc, item, s(5), p.selected, None);
-        let mid = (item.top + item.bottom) / 2;
-        draw::round_rect(hdc, rect(item.left, mid - s(8), s(3), s(16)), s(2), p.accent, None);
+        draw::round_rect(hdc, rect(item.left, mid - s(8), s(3), s(16)), s(2), p.accent, None); // the accent bar
     }
     let icon = RECT { left: item.left + s(12), right: item.left + s(36), ..item };
     draw::glyph(hdc, widgets::ICON_MONITOR, icon, fonts.icon_18, if connected { p.accent } else { p.text2 }, DT_VCENTER);
-    let (left, right, mid) = (item.left + s(40), item.right - s(8), (item.top + item.bottom) / 2);
+    let (left, right) = (item.left + s(40), item.right - s(8));
     draw::text(hdc, title, RECT { left, top: item.top + s(4), right, bottom: mid + s(1) }, fonts.normal, p.text, DT_SINGLELINE | DT_END_ELLIPSIS | DT_BOTTOM);
     draw::text(hdc, subtitle, RECT { left, top: mid + s(1), right, bottom: item.bottom - s(4) }, fonts.small, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
 }

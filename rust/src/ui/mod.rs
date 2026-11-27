@@ -56,6 +56,8 @@ impl<T> Slot<T> {
         Slot(RefCell::new(None))
     }
 
+    /// Puts the state in (when the window is created). Panics if it's lent out: a window is
+    /// only created outside its own messages.
     pub fn set(&self, value: T) {
         *self.0.borrow_mut() = Some(value);
     }

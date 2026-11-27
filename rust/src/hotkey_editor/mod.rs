@@ -38,7 +38,13 @@ const SUMMARY_H: i32 = 40;
 const FOOTER_Y: i32 = SUMMARY_Y + SUMMARY_H + 18;
 const FOOTER_H: i32 = 60;
 const HEIGHT: i32 = FOOTER_Y + FOOTER_H;
+/// Save and Cancel.
+const BUTTON_W: i32 = 100;
+const BUTTON_H: i32 = 32;
+/// The up and down buttons beside the inputs.
+const ARROW_W: i32 = 34;
 
+/// The controls the editor reads from or updates.
 struct Controls {
     monitor: HWND,
     inputs: HWND,
@@ -65,6 +71,7 @@ struct Editor {
     monitor: usize,
     /// Other hotkeys in this configuration, to refuse duplicates.
     taken: Vec<Hotkey>,
+    /// The hotkey being edited (None when adding one).
     existing: Option<Binding>,
     /// Set when the editor closes: Some(binding) saved, None cancelled.
     result: Option<Option<Binding>>,
@@ -103,9 +110,10 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     result
 }
 
+/// Creates and places the controls (at 96 DPI, scaled), and works out the frames painted behind them.
 fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames) {
-    let dpi = f.dpi;
     use Surface::{Card, Layer, Window};
+    let dpi = f.dpi;
     let s = |v: i32| ui::scale(v, dpi);
     let p = |hw: HWND, x: i32, y: i32, w: i32, ht: i32| ui::place(hw, s(x), s(y), s(w), s(ht));
     let r = |x: i32, y: i32, w: i32, ht: i32| rect(s(x), s(y), s(w), s(ht));
@@ -133,14 +141,15 @@ fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames
     // A card holding the inputs, with the up and down buttons on its right.
     let inputs_frame = r(PAD, INPUTS_Y, CONTENT_W, INPUTS_H);
     let inputs = input_list::create(h, ID_INPUTS, f);
-    p(inputs, PAD + 6, INPUTS_Y + 6, CONTENT_W - 12 - 34 - 10, INPUTS_H - 12);
+    p(inputs, PAD + 6, INPUTS_Y + 6, CONTENT_W - 12 - ARROW_W - 10, INPUTS_H - 12);
     let arrow = |id, icon| widgets::button(h, "", id, Some(icon), f, Card);
-    p(arrow(ID_UP, widgets::ICON_UP), PAD + CONTENT_W - 6 - 34, INPUTS_Y + 10, 34, 32);
-    p(arrow(ID_DOWN, widgets::ICON_DOWN), PAD + CONTENT_W - 6 - 34, INPUTS_Y + 10 + 36, 34, 32);
+    let arrow_x = PAD + CONTENT_W - 6 - ARROW_W;
+    p(arrow(ID_UP, widgets::ICON_UP), arrow_x, INPUTS_Y + 10, ARROW_W, BUTTON_H);
+    p(arrow(ID_DOWN, widgets::ICON_DOWN), arrow_x, INPUTS_Y + 10 + BUTTON_H + 4, ARROW_W, BUTTON_H);
 
     p(ui::label(h, "Other input code (hex)", f.normal, Window, true), PAD, CODE_Y + 6, 200, 20);
-    let add_w = 64;
-    let code_frame = r(PAD + CONTENT_W - add_w - 8 - 90, CODE_Y, 90, FIELD_H);
+    let (code_w, add_w) = (90, 64);
+    let code_frame = r(PAD + CONTENT_W - add_w - 8 - code_w, CODE_Y, code_w, FIELD_H);
     let code = TextBox::create(h, ID_CODE, f.normal, f);
     code.place(code_frame, dpi);
     p(widgets::button(h, "Add", ID_ADD_CODE, None, f, Window), PAD + CONTENT_W - add_w, CODE_Y, add_w, FIELD_H);
@@ -151,9 +160,9 @@ fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames
     p(summary, PAD + 12 + 26, SUMMARY_Y + 10, CONTENT_W - 24 - 26, 20);
 
     let footer = r(0, FOOTER_Y, WIDTH, FOOTER_H);
-    let by = FOOTER_Y + (FOOTER_H - 32) / 2;
-    p(widgets::accent_button(h, "Save", IDOK, None, f, Layer), WIDTH - PAD - 100 - 8 - 100, by, 100, 32);
-    p(widgets::button(h, "Cancel", IDCANCEL, None, f, Layer), WIDTH - PAD - 100, by, 100, 32);
+    let by = FOOTER_Y + (FOOTER_H - BUTTON_H) / 2;
+    p(widgets::accent_button(h, "Save", IDOK, None, f, Layer), WIDTH - PAD - BUTTON_W - 8 - BUTTON_W, by, BUTTON_W, BUTTON_H);
+    p(widgets::button(h, "Cancel", IDCANCEL, None, f, Layer), WIDTH - PAD - BUTTON_W, by, BUTTON_W, BUTTON_H);
 
     let frames = Frames { hotkey: hotkey_frame, inputs: inputs_frame, code: code_frame, summary: summary_frame, footer };
     (Controls { monitor, inputs, code, summary }, frames)
@@ -260,11 +269,9 @@ impl Editor {
         ui::set_text(self.c.summary, &text);
     }
 
+    /// Add: puts the typed input code in the list.
     fn add_code(&mut self) {
-        let text = ui::get_text(self.c.code.edit);
-        let t = text.trim();
-        let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
-        let Some(code) = u8::from_str_radix(t, 16).ok().filter(|&c| c != 0) else {
+        let Some(code) = parse_code(&ui::get_text(self.c.code.edit)) else {
             dialog::alert(self.hwnd, Icon::Warning, "Not a valid input code", "Enter a hexadecimal code between 01 and FF, for example 1B.");
             return;
         };
@@ -278,8 +285,25 @@ impl Editor {
         let hk = key_box::value();
         let inputs = input_list::checked(self.c.inputs);
         let monitor = self.selected_monitor().map(|m| m.monitor_id.clone());
-        // Each problem gets a heading that describes it, rather than one heading for all of them.
-        let problem: Option<(String, &str)> = if monitor.is_none() {
+        if let Some((heading, message)) = self.problem(hk, &inputs) {
+            dialog::alert(self.hwnd, Icon::Warning, &heading, message);
+            return;
+        }
+        if !self.windows_allows(hk) {
+            return;
+        }
+        self.result = Some(Some(Binding {
+            id: self.existing.as_ref().map_or_else(crate::sys::new_id, |b| b.id.clone()),
+            monitor_id: monitor.unwrap_or_default(),
+            hotkey: hk,
+            inputs,
+        }));
+    }
+
+    /// What's wrong with the hotkey as entered, if anything: a heading that describes the
+    /// problem (rather than one heading for all of them), and what to do about it.
+    fn problem(&self, hk: Hotkey, inputs: &[u8]) -> Option<(String, &'static str)> {
+        if self.selected_monitor().is_none() {
             Some(("Choose a monitor".into(), "Pick the monitor this hotkey should switch."))
         } else if hk.is_empty() {
             Some(("No key combination yet".into(), "Click the key combination box and press the keys to use."))
@@ -292,33 +316,32 @@ impl Editor {
                 "Another hotkey in this configuration uses it. Choose a different combination, or change the other hotkey."))
         } else {
             None
-        };
-        if let Some((heading, message)) = problem {
-            dialog::alert(self.hwnd, Icon::Warning, &heading, message);
-            return;
         }
+    }
 
+    /// Whether Windows will let the hotkey work, asking first if it's a Windows shortcut. Says
+    /// why not when it won't.
+    fn windows_allows(&self, hk: Hotkey) -> bool {
         // Windows refuses combinations already owned by Windows or another app. (The tray's own
         // hotkeys are paused while the editor is open, so they don't count.)
         if self.existing.as_ref().map(|b| b.hotkey) != Some(hk) && !can_register(self.hwnd, hk) {
             dialog::alert(self.hwnd, Icon::Warning, &format!("{} is already in use", hk.display()),
                 "Windows or another app already uses this combination, so InputSwitch can't. Choose another one.");
-            return;
+            return false;
         }
         // Some Windows shortcuts are handled before any app sees them, even when registering works.
         if let Some(what) = crate::reserved::windows_use(&hk) {
             let msg = format!("Windows uses {} for {what}, so it will probably never reach InputSwitch.", hk.display());
-            if !dialog::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway") {
-                return;
-            }
+            return dialog::confirm(self.hwnd, &format!("{} is a Windows shortcut", hk.display()), &msg, "Use anyway");
         }
+        true
+    }
 
-        self.result = Some(Some(Binding {
-            id: self.existing.as_ref().map_or_else(crate::sys::new_id, |b| b.id.clone()),
-            monitor_id: monitor.unwrap_or_default(),
-            hotkey: hk,
-            inputs,
-        }));
+    /// Moves the selected input up (-1) or down (1). The order matters for a cycle, so the
+    /// summary changes too.
+    fn move_input(&self, by: isize) {
+        input_list::move_selected(self.c.inputs, by);
+        self.update_summary();
     }
 
     fn command(&mut self, id: i32, code: u16) {
@@ -327,8 +350,8 @@ impl Editor {
         }
         match (id, code) {
             (ID_MONITOR, BN_CLICKED) => self.choose_monitor(),
-            (ID_UP, BN_CLICKED) => input_list::move_selected(self.c.inputs, -1),
-            (ID_DOWN, BN_CLICKED) => input_list::move_selected(self.c.inputs, 1),
+            (ID_UP, BN_CLICKED) => self.move_input(-1),
+            (ID_DOWN, BN_CLICKED) => self.move_input(1),
             (ID_ADD_CODE, BN_CLICKED) => self.add_code(),
             (ID_CODE, EN_SETFOCUS | EN_KILLFOCUS | EN_CHANGE) => {
                 self.c.code.on_command(code);
@@ -341,10 +364,7 @@ impl Editor {
                 }
             }
             (IDCANCEL, _) => self.result = Some(None),
-            _ => return,
-        }
-        if matches!(id, ID_UP | ID_DOWN) {
-            self.update_summary(); // the order matters for a cycle
+            _ => {}
         }
     }
 
@@ -358,8 +378,16 @@ fn monitor_label(m: &ProfileMonitor) -> String {
     format!("{}  ·  {}", m.name, m.model)
 }
 
+/// An input code typed in hex ("1B" or "0x1B"). None unless it's 01 to FF.
+fn parse_code(text: &str) -> Option<u8> {
+    let t = text.trim();
+    let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+    u8::from_str_radix(t, 16).ok().filter(|&c| c != 0)
+}
+
 /// Whether Windows would let us register this hotkey: registers it briefly, then releases it.
 fn can_register(h: HWND, hk: Hotkey) -> bool {
+    /// The highest id an application may use, well clear of the tray's (which count up from 1).
     const PROBE_ID: i32 = 0xBFFF;
     unsafe {
         if RegisterHotKey(h, PROBE_ID, hk.mods as u32 | MOD_NOREPEAT, hk.vk as u32) == 0 {

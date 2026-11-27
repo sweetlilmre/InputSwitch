@@ -37,10 +37,12 @@ pub fn action(id: i32, code: u16) -> Option<Action> {
     row(TEST_ID).map(Action::Test).or_else(|| row(EDIT_ID).map(Action::Edit)).or_else(|| row(REMOVE_ID).map(Action::Remove))
 }
 
+/// Creates the (empty) list of hotkey cards.
 pub fn create(parent: HWND, id: i32, fonts: &std::rc::Rc<crate::ui::Fonts>) -> HWND {
     card_panel::create(parent, id, fonts, HotkeyCards { cards: Vec::new() })
 }
 
+/// Shows these hotkeys.
 pub fn set_rows(panel: HWND, rows: Vec<Row>) {
     card_panel::update(panel, |h: &mut HotkeyCards, cx| h.set_rows(cx, rows));
 }
@@ -53,7 +55,11 @@ const KEYS_W: i32 = 220;
 const CAP_H: i32 = 25;
 const CAP_MIN_W: i32 = 28;
 const CAP_GAP: i32 = 4;
+/// The action and monitor lines together; the action line is ACTION_H of it.
 const TEXT_H: i32 = 36;
+const ACTION_H: i32 = 20;
+/// Test, Edit and Delete.
+const BUTTONS: i32 = 3;
 const BUTTON_W: i32 = 34;
 const BUTTON_H: i32 = 32;
 const BUTTON_GAP: i32 = 4;
@@ -70,6 +76,7 @@ struct Card {
     rect: RECT,
 }
 
+/// The cards, and the buttons on them.
 pub struct HotkeyCards {
     cards: Vec<Card>,
 }
@@ -110,10 +117,10 @@ impl Cards for HotkeyCards {
         for c in &self.cards {
             let card = c.rect.offset(0, -dy);
             let y = card.top + (card.height() - cx.s(BUTTON_H)) / 2;
-            for (k, &b) in c.buttons.iter().enumerate() {
-                let from_right = (3 - k) as i32;
-                let x = card.right - cx.s(PAD_X) - from_right * cx.s(BUTTON_W) - (from_right - 1) * cx.s(BUTTON_GAP);
+            let mut x = card.right - cx.s(PAD_X) - buttons_width(cx);
+            for &b in &c.buttons {
                 ui::place(b, x, y, cx.s(BUTTON_W), cx.s(BUTTON_H));
+                x += cx.s(BUTTON_W) + cx.s(BUTTON_GAP);
             }
         }
     }
@@ -135,7 +142,8 @@ impl Cards for HotkeyCards {
             let mut x = card.left + s(PAD_X);
             let cap_top = mid - s(CAP_H) / 2;
             for key in &c.row.keys {
-                let cap = rect(x, cap_top, (draw::text_width(key, cx.fonts.key_cap) + s(16) + 2).max(s(CAP_MIN_W)), s(CAP_H));
+                let cap_w = draw::text_width(key, cx.fonts.key_cap) + s(16) + 2; // padding, and a pixel of border each side
+                let cap = rect(x, cap_top, cap_w.max(s(CAP_MIN_W)), s(CAP_H));
                 draw::round_rect(hdc, cap, s(4), p.chip_stroke, None);
                 let face = RECT { left: cap.left + 1, top: cap.top + 1, right: cap.right - 1, bottom: cap.bottom - s(2) };
                 draw::round_rect(hdc, face, s(3), p.field, None);
@@ -145,10 +153,10 @@ impl Cards for HotkeyCards {
 
             // The action, with the monitor underneath.
             let left = (card.left + s(PAD_X + KEYS_W)).max(x + s(12));
-            let right = card.right - s(PAD_X) - 3 * s(BUTTON_W) - 2 * s(BUTTON_GAP) - s(12);
+            let right = card.right - s(PAD_X) - buttons_width(cx) - s(12);
             let top = mid - s(TEXT_H) / 2;
-            draw::text(hdc, &c.row.action, RECT { left, top, right, bottom: top + s(20) }, cx.fonts.normal, p.text, DT_SINGLELINE | DT_END_ELLIPSIS);
-            draw::text(hdc, &c.row.monitor, RECT { left, top: top + s(20), right, bottom: top + s(TEXT_H) }, cx.fonts.small, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
+            draw::text(hdc, &c.row.action, RECT { left, top, right, bottom: top + s(ACTION_H) }, cx.fonts.normal, p.text, DT_SINGLELINE | DT_END_ELLIPSIS);
+            draw::text(hdc, &c.row.monitor, RECT { left, top: top + s(ACTION_H), right, bottom: top + s(TEXT_H) }, cx.fonts.small, p.text2, DT_SINGLELINE | DT_END_ELLIPSIS);
         }
     }
 
@@ -161,5 +169,10 @@ impl Cards for HotkeyCards {
             widgets::set_fonts(b, &cx.fonts);
         }
     }
+}
+
+/// The width of a card's buttons, side by side, in pixels.
+fn buttons_width(cx: &Ctx) -> i32 {
+    BUTTONS * cx.s(BUTTON_W) + (BUTTONS - 1) * cx.s(BUTTON_GAP)
 }
 

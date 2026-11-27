@@ -11,16 +11,23 @@ use crate::hotkey::{self, Hotkey};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
+/// Posted to the box by the hook when Win goes down or up.
 const WM_WIN_CHANGED: u32 = WM_APP + 10;
+const SUBCLASS_ID: usize = 1;
+/// GetAncestor's "the parent window".
+const GA_PARENT: u32 = 1;
 const PLACEHOLDER_LISTENING: &str = "Press the keys now…";
 const PLACEHOLDER_IDLE: &str = "Click here to record a key combination";
 const HINT_LISTENING: &str = "Listening — press the keys now. Win shortcuts are captured while this box is selected. Backspace clears it.";
 const HINT_IDLE: &str = "Click the box and press the keys. Use Ctrl, Alt or Win with a key (or F13–F24). Backspace clears it.";
 
+/// The box, or 0 when there isn't one. The hook needs it, so it's shared rather than per window.
 static BOX: AtomicIsize = AtomicIsize::new(0);
+/// The label that says whether the box is listening (0 for none).
 static HINT: AtomicIsize = AtomicIsize::new(0);
 /// The box has keyboard focus, so it's recording (and the hook is on).
 static LISTENING: AtomicBool = AtomicBool::new(false);
+/// The low-level keyboard hook, or 0 while it's off.
 static HOOK: AtomicIsize = AtomicIsize::new(0);
 /// Win is down (as seen by the hook, which hides it from the rest of the system).
 static WIN_DOWN: AtomicBool = AtomicBool::new(false);
@@ -40,6 +47,7 @@ pub enum KeyAction {
     Set(Hotkey),
 }
 
+/// What pressing key `vk` with modifiers `mods` held does to the box.
 pub fn classify(vk: u16, mods: u8) -> KeyAction {
     match vk {
         VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | 0xA0..=0xA5 // left/right Shift, Ctrl, Alt
@@ -81,7 +89,7 @@ pub fn create(parent: HWND, id: i32, font: HFONT, initial: Hotkey, hint: HWND) -
     BOX.store(h, Ordering::Relaxed);
     HINT.store(hint, Ordering::Relaxed);
     LISTENING.store(false, Ordering::Relaxed);
-    unsafe { SetWindowSubclass(h, box_proc, 1, 0) };
+    unsafe { SetWindowSubclass(h, box_proc, SUBCLASS_ID, 0) };
     set_listening(h, false);
     h
 }
@@ -102,6 +110,7 @@ fn background() -> u32 {
     crate::ui::text_box::field_color(LISTENING.load(Ordering::Relaxed))
 }
 
+/// Whether the box is recording (it has focus), so its frame shows the accent underline.
 pub fn is_listening() -> bool {
     LISTENING.load(Ordering::Relaxed)
 }
@@ -119,6 +128,7 @@ pub fn ctl_color(hdc: HDC, control: HWND) -> Option<LRESULT> {
     }
     Some(crate::ui::theme::brush(bg))
 }
+
 /// Updates the tint, the hint and the placeholder for whether the box is listening.
 fn set_listening(h: HWND, on: bool) {
     LISTENING.store(on, Ordering::Relaxed);
@@ -130,10 +140,11 @@ fn set_listening(h: HWND, on: bool) {
     unsafe {
         InvalidateRect(h, core::ptr::null(), 1);
         // The frame around the box (drawn by the editor) changes colour too.
-        RedrawWindow(GetAncestor(h, 1 /* GA_PARENT */), core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE);
+        RedrawWindow(GetAncestor(h, GA_PARENT), core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE);
     }
 }
 
+/// Shows the modifiers held so far (`partial`), else the recorded combination, else a placeholder.
 fn show(h: HWND, partial: Option<u8>) {
     let text = match partial {
         Some(m) if m != 0 => hotkey::partial_display(m),
@@ -151,35 +162,35 @@ fn show(h: HWND, partial: Option<u8>) {
     crate::ui::set_text(h, &text);
 }
 
+/// Shows the modifiers held now, or the recorded combination once they're all released.
+fn show_held(h: HWND) {
+    let mods = current_mods();
+    show(h, (mods != 0).then_some(mods));
+}
+
+/// Records a combination (or clears it, with the empty one) and shows it.
+fn record(h: HWND, hk: Hotkey) {
+    CAPTURED.with(|c| c.set(hk));
+    show(h, None);
+}
+
 unsafe extern "system" fn box_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: usize, _data: usize) -> LRESULT {
     match m {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             match classify(w as u16, current_mods()) {
                 KeyAction::Partial(mods) => show(h, Some(mods)),
-                KeyAction::Clear => {
-                    CAPTURED.with(|c| c.set(Hotkey::default()));
-                    show(h, None);
-                }
-                KeyAction::Set(hk) => {
-                    CAPTURED.with(|c| c.set(hk));
-                    show(h, None);
-                }
+                KeyAction::Clear => record(h, Hotkey::default()),
+                KeyAction::Set(hk) => record(h, hk),
             }
             return 0;
         }
         WM_KEYUP | WM_SYSKEYUP => {
-            // Back to the recorded combination once every modifier is released.
-            if current_mods() == 0 {
-                show(h, None);
-            } else {
-                show(h, Some(current_mods()));
-            }
+            show_held(h);
             return 0;
         }
         _ if (WM_KEYFIRST..=WM_KEYLAST).contains(&m) => return 0, // characters: nothing to type
         WM_WIN_CHANGED => {
-            let mods = current_mods();
-            show(h, if mods == 0 { None } else { Some(mods) });
+            show_held(h);
             return 0;
         }
         WM_SETFOCUS => {
@@ -202,13 +213,14 @@ unsafe extern "system" fn box_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: u
             BOX.store(0, Ordering::Relaxed);
             HINT.store(0, Ordering::Relaxed);
             LISTENING.store(false, Ordering::Relaxed);
-            RemoveWindowSubclass(h, box_proc, 1);
+            RemoveWindowSubclass(h, box_proc, SUBCLASS_ID);
         }
         _ => {}
     }
     DefSubclassProc(h, m, w, l)
 }
 
+/// Removes the keyboard hook, if it's on.
 fn unhook() {
     let hook = HOOK.swap(0, Ordering::Relaxed);
     if hook != 0 {

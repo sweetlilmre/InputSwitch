@@ -2,6 +2,7 @@
 
 use crate::ffi::*;
 use crate::registry::RegKey;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 32 random hex digits (like a GUID in "N" format).
 pub fn new_id() -> String {
@@ -9,10 +10,10 @@ pub fn new_id() -> String {
     let mut b = [0u8; 16];
     if unsafe { BCryptGenRandom(0, b.as_mut_ptr(), b.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } != 0 {
         // Never all zeros (ids must differ): the time and a counter instead.
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
         b[..8].copy_from_slice(&now.to_le_bytes());
-        b[8..].copy_from_slice(&COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed).to_le_bytes());
+        b[8..].copy_from_slice(&COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
     }
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -26,9 +27,8 @@ pub fn utc_now() -> String {
 
 pub const APP_NAME: &str = "InputSwitch";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The git commit this was built from, as build.rs found it: empty when git isn't available.
 pub const COMMIT: &str = env!("GIT_COMMIT");
-
-// build.rs sets GIT_COMMIT, to "" when git isn't available.
 
 /// "0.1.0+<commit>" when the commit is known.
 #[allow(clippy::const_is_empty)]
@@ -47,6 +47,7 @@ pub fn display_version() -> String {
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "InputSwitch";
 
+/// What the Run key holds for this copy of the app: its path, quoted.
 fn startup_command() -> String {
     let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
     format!("\"{exe}\"")

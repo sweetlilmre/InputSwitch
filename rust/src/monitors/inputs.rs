@@ -40,8 +40,7 @@ pub fn describe_action(inputs: &[u8]) -> String {
 
 /// The allowed values of VCP 0x60 in an MCCS capabilities string, e.g. `... vcp(... 60(01 0F 11) ...)`.
 pub fn parse_capabilities(caps: &str) -> Vec<u8> {
-    let mut result = Vec::new();
-    let Some(start) = caps.to_ascii_lowercase().find("vcp(") else { return result };
+    let Some(start) = caps.to_ascii_lowercase().find("vcp(") else { return Vec::new() };
     let b = caps.as_bytes();
     let (mut i, mut depth) = (start + 4, 1);
     while i < b.len() && depth > 0 {
@@ -55,20 +54,9 @@ pub fn parse_capabilities(caps: &str) -> Vec<u8> {
                     i += 1;
                 }
                 let code = &caps[code_start..i];
-                let mut j = i;
-                while j < b.len() && b[j] == b' ' {
-                    j += 1;
-                }
-                if depth == 1 && code.eq_ignore_ascii_case("60") && b.get(j) == Some(&b'(') {
-                    let Some(close) = caps[j..].find(')') else { break };
-                    for v in caps[j + 1..j + close].split_ascii_whitespace() {
-                        if let Ok(code) = u8::from_str_radix(v, 16) {
-                            if !result.contains(&code) {
-                                result.push(code);
-                            }
-                        }
-                    }
-                    break;
+                let rest = caps[i..].trim_start_matches(' ');
+                if depth == 1 && code.eq_ignore_ascii_case("60") && rest.starts_with('(') {
+                    return rest.find(')').map(|close| distinct_hex(&rest[1..close])).unwrap_or_default();
                 }
                 continue;
             }
@@ -76,7 +64,18 @@ pub fn parse_capabilities(caps: &str) -> Vec<u8> {
         }
         i += 1;
     }
-    result
+    Vec::new()
+}
+
+/// The hex numbers in a space-separated list, each once, in order. Anything else is skipped.
+fn distinct_hex(list: &str) -> Vec<u8> {
+    let mut codes = Vec::new();
+    for code in list.split_ascii_whitespace().filter_map(|v| u8::from_str_radix(v, 16).ok()) {
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
+    }
+    codes
 }
 
 #[cfg(test)]
