@@ -109,8 +109,7 @@ pub fn hwnd() -> HWND {
 }
 
 pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<String>, select: Option<String>) {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| ui::register_class(CLASS, wndproc, ui::app_icon()));
+    ui::register_class(CLASS, wndproc, ui::app_icon(), 0);
 
     let hwnd = layout::create_window(CLASS);
     HWND_MAIN.store(hwnd, Ordering::Relaxed);

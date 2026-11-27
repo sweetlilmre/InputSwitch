@@ -3,6 +3,8 @@
 use super::*;
 
 pub const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+pub const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+pub const DWMWCP_ROUND: u32 = 2;
 
 #[link(name = "dwmapi")]
 extern "system" {

@@ -32,8 +32,8 @@ pub enum Kind {
     Check,
     /// A WinUI-style on/off toggle switch.
     Switch,
-    /// A drop-down field: the choice on the left, a chevron on the right. The parent shows the
-    /// choices when it's clicked (see [`choose`]).
+    /// A drop-down field: the choice on the left, a chevron on the right (see [`super::drop_down`]).
+    /// `checked` means its list is open: the chevron points up.
     DropDown,
 }
 
@@ -65,22 +65,6 @@ pub fn button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fon
 /// A drop-down field showing `text` (the current choice).
 pub fn drop_down(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface) -> HWND {
     create(parent, text, id, Kind::DropDown, None, fonts, surface)
-}
-
-/// Shows choices in a menu under drop-down h, the current one ticked. Returns the one picked.
-pub fn choose(h: HWND, choices: &[String], current: Option<usize>) -> Option<usize> {
-    let mut r = RECT::default();
-    unsafe {
-        GetWindowRect(h, &mut r);
-        let menu = CreatePopupMenu();
-        for (i, c) in choices.iter().enumerate() {
-            let checked = if Some(i) == current { MF_CHECKED } else { 0 };
-            AppendMenuW(menu, MF_STRING | checked, i + 1, wide(c).as_ptr());
-        }
-        let picked = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, r.left, r.bottom, 0, GetParent(h), core::ptr::null());
-        DestroyMenu(menu);
-        (picked > 0).then(|| picked as usize - 1)
-    }
 }
 
 pub fn accent_button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
@@ -153,6 +137,9 @@ unsafe extern "system" fn proc_(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: usiz
             RedrawWindow(h, core::ptr::null(), 0, RDW_INVALIDATE);
         }
         WM_ERASEBKGND => return 1, // drawn entirely in WM_DRAWITEM; avoids flicker
+        // An owner-drawn button turns a quick second click into a double-click, which doesn't
+        // click it: treat it as the press it is (so a checkbox can be ticked and unticked quickly).
+        WM_LBUTTONDBLCLK => return DefSubclassProc(h, WM_LBUTTONDOWN, w, l),
         WM_NCDESTROY => {
             INFO.with(|i| i.borrow_mut().remove(&h));
             theme::forget(h);
@@ -251,7 +238,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
 
     if kind == Kind::DropDown {
         let chevron = RECT { left: r.right - s(12 + 16), right: r.right - s(12), ..r };
-        draw::glyph(hdc, ICON_DOWN, chevron, icon_font, fg, DT_CENTER | DT_VCENTER);
+        draw::glyph(hdc, if checked { ICON_UP } else { ICON_DOWN }, chevron, icon_font, fg, DT_CENTER | DT_VCENTER);
         let label = RECT { left: r.left + s(12), right: chevron.left - s(8), ..r };
         draw::text(hdc, &text, label, font, fg, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     } else {

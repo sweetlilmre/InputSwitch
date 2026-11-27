@@ -66,8 +66,10 @@ pub struct Palette {
     /// A chip or key cap on a row (ControlFillColorSecondary) and its border.
     pub chip: u32,
     pub chip_stroke: u32,
-    /// The selected configuration in the list.
+    /// The selected item in a list.
     pub selected: u32,
+    /// A drop-down list's background.
+    pub flyout: u32,
     // Text.
     pub text: u32,
     pub text2: u32,
@@ -95,7 +97,7 @@ fn make_palette(dark: bool, accent: u32) -> Palette {
             control: rgb(55, 55, 55), control_hot: rgb(62, 62, 62), control_pressed: rgb(48, 48, 48), control_stroke: rgb(75, 75, 75),
             field: on_card(0.09), field_stroke: on_card(0.08), field_underline: on_card(0.55),
             chip: on_card(0.11), chip_stroke: on_card(0.13),
-            selected: rgb(58, 58, 58),
+            selected: rgb(58, 58, 58), flyout: rgb(44, 44, 44),
             text: WHITE, text2: rgb(200, 200, 200), text_disabled: rgb(120, 120, 120),
             accent, accent_hot: mix(accent, WHITE, 0.15), on_accent: BLACK,
             success: rgb(57, 61, 27), caution: rgb(67, 53, 25), neutral: rgb(50, 50, 50),
@@ -111,7 +113,7 @@ fn make_palette(dark: bool, accent: u32) -> Palette {
             control: rgb(253, 253, 253), control_hot: rgb(246, 246, 246), control_pressed: rgb(240, 240, 240), control_stroke: rgb(208, 208, 208),
             field: WHITE, field_stroke: on_card(0.07), field_underline: on_card(0.45),
             chip: rgb(249, 249, 249), chip_stroke: on_card(0.07),
-            selected: rgb(234, 234, 234),
+            selected: rgb(234, 234, 234), flyout: rgb(249, 249, 249),
             text: rgb(26, 26, 26), text2: rgb(96, 96, 96), text_disabled: rgb(160, 160, 160),
             accent, accent_hot: mix(accent, BLACK, 0.1), on_accent: WHITE,
             success: rgb(223, 246, 221), caution: rgb(255, 244, 206), neutral: rgb(240, 240, 240),

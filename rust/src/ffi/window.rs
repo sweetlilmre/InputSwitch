@@ -129,7 +129,15 @@ pub const WM_MEASUREITEM: u32 = 0x002C;
 pub const WM_CTLCOLOREDIT: u32 = 0x0133;
 pub const WM_CTLCOLORLISTBOX: u32 = 0x0134;
 pub const WM_CTLCOLORBTN: u32 = 0x0135;
+pub const WM_SHOWWINDOW: u32 = 0x0018;
+pub const WM_ACTIVATEAPP: u32 = 0x001C;
 pub const WM_MOUSEMOVE: u32 = 0x0200;
+pub const WM_LBUTTONDOWN: u32 = 0x0201;
+pub const WM_LBUTTONUP: u32 = 0x0202;
+pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
+pub const WM_CAPTURECHANGED: u32 = 0x0215;
+pub const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+pub const CS_DROPSHADOW: u32 = 0x0002_0000;
 pub const WM_MOUSELEAVE: u32 = 0x02A3;
 pub const WM_THEMECHANGED: u32 = 0x031A;
 pub const MB_ICONEXCLAMATION: u32 = 0x30;
@@ -204,4 +212,6 @@ extern "system" {
     pub fn MessageBeep(kind: u32) -> BOOL;
     pub fn SetScrollInfo(h: HWND, bar: i32, si: *const SCROLLINFO, redraw: BOOL) -> i32;
     pub fn GetParent(h: HWND) -> HWND;
+    pub fn SetCapture(h: HWND) -> HWND;
+    pub fn ReleaseCapture() -> BOOL;
 }

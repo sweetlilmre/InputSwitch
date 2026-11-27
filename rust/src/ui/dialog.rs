@@ -63,8 +63,7 @@ pub fn show(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
     if STATE.with(|s| s.occupied()) {
         return show_system(owner, icon, heading, message, buttons); // one at a time (a dialog over a dialog)
     }
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| super::register_class(CLASS, wndproc, super::app_icon()));
+    super::register_class(CLASS, wndproc, super::app_icon(), 0);
 
     let dpi = unsafe { if owner != 0 { GetDpiForWindow(owner) } else { GetDpiForSystem() } }.max(96);
     let fonts = Fonts::new(dpi);

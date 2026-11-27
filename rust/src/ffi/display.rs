@@ -3,6 +3,8 @@
 use super::*;
 use core::ffi::c_void;
 
+pub const MONITOR_DEFAULTTONEAREST: u32 = 2;
+
 pub type MONITORENUMPROC = unsafe extern "system" fn(HMONITOR, HDC, *mut RECT, LPARAM) -> BOOL;
 
 #[repr(C)]
@@ -112,6 +114,7 @@ extern "system" {
 extern "system" {
     pub fn EnumDisplayMonitors(hdc: HDC, clip: *const RECT, f: MONITORENUMPROC, data: LPARAM) -> BOOL;
     pub fn GetMonitorInfoW(m: HMONITOR, info: *mut MONITORINFOEXW) -> BOOL;
+    pub fn MonitorFromWindow(h: HWND, flags: u32) -> HMONITOR;
     pub fn GetDisplayConfigBufferSizes(flags: u32, paths: *mut u32, modes: *mut u32) -> i32;
     pub fn QueryDisplayConfig(flags: u32, np: *mut u32, paths: *mut DISPLAYCONFIG_PATH_INFO, nm: *mut u32,
         modes: *mut DISPLAYCONFIG_MODE_INFO, topology: *mut c_void) -> i32;

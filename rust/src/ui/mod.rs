@@ -5,6 +5,7 @@
 pub mod card_panel;
 pub mod dialog;
 pub mod draw;
+pub mod drop_down;
 pub mod fonts;
 pub mod lists;
 pub mod theme;
@@ -60,11 +61,19 @@ impl<T> Slot<T> {
 
 // ------------------------------------------------------------------------------------------ windows
 
-pub fn register_class(name: &str, proc: WNDPROC, icon: HICON) {
+/// Registers window class `name` the first time it's asked for (later calls do nothing).
+pub fn register_class(name: &'static str, proc: WNDPROC, icon: HICON, style: u32) {
+    thread_local! {
+        static REGISTERED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    }
+    if REGISTERED.with(|r| r.borrow().contains(&name)) {
+        return;
+    }
+    REGISTERED.with(|r| r.borrow_mut().push(name));
     let class = wide(name);
     let wc = WNDCLASSEXW {
         cbSize: core::mem::size_of::<WNDCLASSEXW>() as u32,
-        style: 0,
+        style,
         lpfnWndProc: Some(proc),
         cbClsExtra: 0,
         cbWndExtra: 0,

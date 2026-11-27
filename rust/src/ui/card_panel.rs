@@ -153,8 +153,7 @@ fn with_panel<R>(h: HWND, f: impl FnOnce(&mut dyn AnyPanel) -> R) -> Option<R> {
 
 /// Creates a panel showing `cards`, as a child of `parent` with the given control id.
 pub fn create<T: Cards>(parent: HWND, id: i32, dpi: u32, cards: T) -> HWND {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| super::register_class(CLASS, wndproc, 0));
+    super::register_class(CLASS, wndproc, 0, 0);
     let h = unsafe {
         // Not WS_TABSTOP itself: a control parent that's also a tab stop sends dialog navigation
         // round in circles. The controls on the cards are the tab stops.

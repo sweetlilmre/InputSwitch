@@ -80,8 +80,7 @@ fn with<R>(f: impl FnOnce(&mut Editor) -> R) -> Option<R> {
 
 /// Shows the editor modally over `owner`. Returns the new or changed hotkey, or None if cancelled.
 pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>) -> Option<Binding> {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| ui::register_class(CLASS, wndproc, ui::app_icon()));
+    ui::register_class(CLASS, wndproc, ui::app_icon(), 0);
 
     let title = if existing.is_some() { "Edit hotkey" } else { "Add hotkey" };
     let hwnd = ui::popup_window(CLASS, title, owner, WIDTH, HEIGHT, dpi);
@@ -118,7 +117,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
     };
 
     field_label("Monitor", 16);
-    let monitor = widgets::drop_down(h, "", ID_MONITOR, f, Window);
+    let monitor = ui::drop_down::create(h, "", ID_MONITOR, f, Window);
     p(monitor, PAD, 42, CONTENT_W, FIELD_H);
 
     field_label("Key combination", 90);
@@ -254,7 +253,7 @@ impl Editor {
     /// The Monitor drop-down was clicked: offer the configuration's monitors.
     fn choose_monitor(&mut self) {
         let names: Vec<String> = self.monitors.iter().map(monitor_label).collect();
-        if let Some(i) = widgets::choose(self.c.monitor, &names, Some(self.monitor)).filter(|&i| i != self.monitor) {
+        if let Some(i) = ui::drop_down::choose(self.c.monitor, &names, Some(self.monitor)).filter(|&i| i != self.monitor) {
             self.monitor = i;
             ui::set_text(self.c.monitor, &names[i]);
             self.fill_inputs();

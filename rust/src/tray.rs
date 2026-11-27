@@ -84,7 +84,7 @@ fn with<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
 
 pub fn run(open_main_window: bool) -> i32 {
     let icon = ui::app_icon();
-    ui::register_class(CLASS, wndproc, icon);
+    ui::register_class(CLASS, wndproc, icon, 0);
     let hwnd = unsafe {
         // A hidden top-level window: message-only windows don't get display/device broadcasts.
         CreateWindowExW(0, wide(CLASS).as_ptr(), wide(ui::TITLE).as_ptr(), WS_OVERLAPPEDWINDOW, 0, 0, 0, 0, 0, 0, hinstance(), core::ptr::null())
