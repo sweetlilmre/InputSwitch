@@ -7,9 +7,8 @@
 use crate::config::{self, AppConfig};
 use crate::ffi::*;
 use crate::monitors::{self, MonitorInfo};
-use crate::ui::{self, dialog};
+use crate::ui::{self, dialog, Slot};
 use crate::{main_window, matcher, sys};
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 
@@ -40,7 +39,8 @@ pub fn post(ev: Event) {
 }
 
 enum MenuAction {
-    Run(usize),
+    /// Run a hotkey's action. By id: the configuration can change while the menu is open.
+    Run { profile: String, binding: String },
     SetInput(MonitorInfo, u8),
     Configure,
     Redetect,
@@ -60,18 +60,26 @@ struct Tray {
     capturing: bool,
     /// Registration failures last reported, so the same ones aren't reported on every change.
     last_failures: String,
-    /// Profile to open when the current balloon is clicked (outer None: no action).
-    balloon: Option<Option<String>>,
-    /// Registered hotkey id → binding index in the active profile.
-    hotkeys: Vec<(i32, usize)>,
+    /// What clicking the current notification does.
+    on_balloon_click: OnClick,
+    /// The ids of the active configuration's registered hotkeys; hotkey id n is binding n - 1.
+    hotkeys: Vec<i32>,
+}
+
+/// What clicking a notification does.
+#[derive(Clone)]
+enum OnClick {
+    Nothing,
+    /// Open the main window on this configuration (or the active one).
+    Open(Option<String>),
 }
 
 thread_local! {
-    static TRAY: RefCell<Option<Tray>> = const { RefCell::new(None) };
+    static TRAY: Slot<Tray> = const { Slot::new() };
 }
 
 fn with<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
-    TRAY.with(|t| t.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
+    TRAY.with(|t| t.with(f))
 }
 
 pub fn run(open_main_window: bool) -> i32 {
@@ -87,16 +95,15 @@ pub fn run(open_main_window: bool) -> i32 {
     let (config, error) = config::load();
     if let Some(e) = error {
         dialog::alert(0, dialog::Icon::Warning, "Your settings couldn't be read",
-            &format!("{e}\n\nInputSwitch will start with fresh settings. The unreadable file was kept as config.json.bad in {}.", config::dir().display()));
+            &format!("{e}\n\nInputSwitch will start with fresh settings."));
     }
     let first_run = config.profiles.is_empty();
     crate::ui::theme::set_choice(config.theme);
 
-    TRAY.with(|t| {
-        *t.borrow_mut() = Some(Tray {
-            hwnd, icon, config, connected: Vec::new(), active: None, main_window_open: false, capturing: false, last_failures: String::new(), balloon: None, hotkeys: Vec::new(),
-        })
-    });
+    TRAY.with(|t| t.set(Tray {
+        hwnd, icon, config, connected: Vec::new(), active: None, main_window_open: false, capturing: false,
+        last_failures: String::new(), on_balloon_click: OnClick::Nothing, hotkeys: Vec::new(),
+    }));
     unsafe { WTSRegisterSessionNotification(hwnd, 0) };
     with(|t| {
         t.add_icon();
@@ -146,7 +153,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
                 x if x as u32 == WM_CONTEXTMENU => show_menu(h),
                 NIN_BALLOONUSERCLICK => {
                     with(|t| {
-                        if let Some(target) = t.balloon.take() {
+                        if let OnClick::Open(target) = std::mem::replace(&mut t.on_balloon_click, OnClick::Nothing) {
                             t.open_main_window(target);
                         }
                     });
@@ -156,10 +163,12 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             return 0;
         }
         WM_POKE => {
-            let events: Vec<Event> = std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()));
-            for ev in events {
-                with(|t| t.on_event(ev));
-            }
+            // Taken only once the tray is free, so none are lost (they wait for the next poke).
+            with(|t| {
+                for ev in std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner())) {
+                    t.on_event(ev);
+                }
+            });
             return 0;
         }
         WM_DESTROY => {
@@ -236,12 +245,9 @@ impl Tray {
             index = Some(self.config.profiles.len() - 1);
         }
 
-        let new_active = index.map(|i| self.config.profiles[i].id.clone());
-        let changed = new_active != self.active;
-        self.active = new_active;
-
-        if self.main_window_open {
-            main_window::update_connection(self.connected.clone(), self.active.clone());
+        let changed = self.set_active(index);
+        if self.main_window_open && !changed {
+            main_window::update_connection(self.connected.clone(), self.active.clone()); // new monitors, same setup
         }
         self.register_hotkeys(changed);
         self.update_tip();
@@ -251,17 +257,34 @@ impl Tray {
                 self.open_main_window(Some(id));
             } else {
                 self.notify("New display setup detected",
-                    &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, Some(Some(id)));
+                    &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, OnClick::Open(Some(id)));
             }
         } else if changed && !self.main_window_open {
             if let Some(p) = self.active_profile() {
-                let text = if p.enabled { format!("{} hotkey(s) active.", p.bindings.len()) } else { "This configuration is disabled. Click to configure.".into() };
+                let text = match (p.enabled, self.hotkeys.len()) {
+                    (false, _) => "This configuration is disabled. Click to configure.".into(),
+                    (true, 1) => "1 hotkey active.".into(),
+                    (true, n) => format!("{n} hotkeys active."),
+                };
                 let (title, id) = (format!("Display setup: {}", p.name), p.id.clone());
-                self.notify(&title, &text, NIIF_NONE, Some(Some(id)));
+                self.notify(&title, &text, NIIF_NONE, OnClick::Open(Some(id)));
             }
         } else if interactive && self.active.is_none() {
             self.open_main_window(None);
         }
+    }
+
+    /// Makes configuration index the active one; tells the main window. True if it changed.
+    fn set_active(&mut self, index: Option<usize>) -> bool {
+        let new_active = index.map(|i| self.config.profiles[i].id.clone());
+        if new_active == self.active {
+            return false;
+        }
+        self.active = new_active;
+        if self.main_window_open {
+            main_window::update_connection(self.connected.clone(), self.active.clone());
+        }
+        true
     }
 
     fn active_profile(&self) -> Option<&config::Profile> {
@@ -271,13 +294,13 @@ impl Tray {
 
     fn save(&mut self) {
         if let Err(e) = config::save(&self.config) {
-            self.notify("Could not save configuration", &e.to_string(), NIIF_ERROR, None);
+            self.notify("Could not save configuration", &e.to_string(), NIIF_ERROR, OnClick::Nothing);
         }
     }
 
     fn on_event(&mut self, ev: Event) {
         match ev {
-            Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, None),
+            Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, OnClick::Nothing),
             Event::ConfigChanged(cfg) => {
                 self.config = cfg;
                 crate::ui::theme::set_choice(self.config.theme);
@@ -285,13 +308,7 @@ impl Tray {
                 // Configurations may have been added, deleted or changed: keep the same one active
                 // if it still fits.
                 let index = matcher::find(&self.config, &matcher::fingerprint(&self.connected), self.active.as_deref());
-                let new_active = index.map(|i| self.config.profiles[i].id.clone());
-                if new_active != self.active {
-                    self.active = new_active;
-                    if self.main_window_open {
-                        main_window::update_connection(self.connected.clone(), self.active.clone());
-                    }
-                }
+                self.set_active(index);
                 self.register_hotkeys(true);
                 self.update_tip();
             }
@@ -310,7 +327,7 @@ impl Tray {
     // -------------------------------------------------------------------------------- hotkeys
 
     fn unregister_hotkeys(&mut self) {
-        for (id, _) in self.hotkeys.drain(..) {
+        for id in self.hotkeys.drain(..) {
             unsafe { UnregisterHotKey(self.hwnd, id) };
         }
     }
@@ -332,7 +349,7 @@ impl Tray {
             }
             let id = i as i32 + 1;
             if unsafe { RegisterHotKey(self.hwnd, id, b.hotkey.mods as u32 | MOD_NOREPEAT, b.hotkey.vk as u32) } != 0 {
-                registered.push((id, i));
+                registered.push(id);
             } else {
                 failed.push(b.hotkey.display());
             }
@@ -344,13 +361,14 @@ impl Tray {
         self.last_failures = failures;
         if report && !failed.is_empty() && news {
             self.notify("Some hotkeys could not be registered",
-                &format!("{} — probably in use by another application.", failed.join(", ")), NIIF_WARNING, Some(Some(target)));
+                &format!("{} — probably in use by another application.", failed.join(", ")), NIIF_WARNING, OnClick::Open(Some(target)));
         }
     }
 
     fn on_hotkey(&mut self, id: i32) {
-        let Some(&(_, index)) = self.hotkeys.iter().find(|(h, _)| *h == id) else { return };
-        self.run_binding(index);
+        if self.hotkeys.contains(&id) {
+            self.run_binding(id as usize - 1);
+        }
     }
 
     fn run_binding(&mut self, index: usize) {
@@ -359,7 +377,7 @@ impl Tray {
         let monitor = self.connected.iter().find(|m| m.id.eq_ignore_ascii_case(&b.monitor_id)).cloned();
         let Some(monitor) = monitor else {
             let name = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "The monitor".into());
-            self.notify("Monitor not connected", &format!("{name} is not currently connected to this computer."), NIIF_WARNING, None);
+            self.notify("Monitor not connected", &format!("{name} is not currently connected to this computer."), NIIF_WARNING, OnClick::Nothing);
             return;
         };
         let inputs = b.inputs.clone();
@@ -425,11 +443,11 @@ impl Tray {
 
     /// Shows a notification. The "notify when the setup changes" option silences only routine
     /// ones (NIIF_NONE); problems and new setups always show.
-    fn notify(&mut self, title: &str, text: &str, kind: u32, on_click: Option<Option<String>>) {
+    fn notify(&mut self, title: &str, text: &str, kind: u32, on_click: OnClick) {
         if !self.config.show_notifications && kind == NIIF_NONE {
             return;
         }
-        self.balloon = on_click;
+        self.on_balloon_click = on_click;
         let mut d = self.icon_data();
         d.uFlags = NIF_INFO;
         d.dwInfoFlags = kind;
@@ -442,70 +460,71 @@ impl Tray {
 
     fn build_menu(&self) -> (HMENU, Vec<MenuAction>) {
         let mut actions = Vec::new();
-        let mut add = |menu: HMENU, flags: u32, text: &str, action: Option<MenuAction>| unsafe {
-            let id = match action {
-                Some(a) => {
-                    actions.push(a);
-                    actions.len()
-                }
-                None => 0,
-            };
-            AppendMenuW(menu, flags, id, wide(text).as_ptr());
+        // Appends an item; its command id is its action's position (from 1), or 0 for none.
+        let mut add = |menu: HMENU, flags: u32, text: &str, action: Option<MenuAction>| {
+            let id = action.map_or(0, |a| {
+                actions.push(a);
+                actions.len()
+            });
+            unsafe { AppendMenuW(menu, flags, id, wide(text).as_ptr()) };
             id
         };
+        let menu = unsafe { CreatePopupMenu() };
+        let active = self.active_profile();
 
-        unsafe {
-            let menu = CreatePopupMenu();
-            let header = match self.active_profile() {
-                None if matcher::fingerprint(&self.connected).is_empty() => "No external monitors".to_string(),
-                None => "Unknown display setup".to_string(),
-                Some(p) => format!("Setup: {}{}", p.name, if p.enabled { "" } else { " (disabled)" }),
-            };
-            add(menu, MF_STRING | MF_GRAYED, &header, None);
+        let header = match active {
+            None if matcher::fingerprint(&self.connected).is_empty() => "No external monitors".to_string(),
+            None => "Unknown display setup".to_string(),
+            Some(p) => format!("Setup: {}{}", p.name, if p.enabled { "" } else { " (disabled)" }),
+        };
+        add(menu, MF_STRING | MF_GRAYED, &header, None);
 
-            if let Some(p) = self.active_profile() {
-                for (i, b) in p.bindings.iter().enumerate() {
-                    let monitor = p.monitor(&b.monitor_id).map(|m| m.name.as_str()).unwrap_or("?");
-                    let text = format!("{monitor}: {}\t{}", monitors::describe_action(&b.inputs), b.hotkey.display());
-                    add(menu, MF_STRING, &text, Some(MenuAction::Run(i)));
-                }
+        if let Some(p) = active {
+            for b in &p.bindings {
+                let monitor = p.monitor(&b.monitor_id).map_or("?", |m| m.name.as_str());
+                let text = format!("{monitor}: {}\t{}", monitors::describe_action(&b.inputs), b.hotkey.display());
+                add(menu, MF_STRING, &text, Some(MenuAction::Run { profile: p.id.clone(), binding: b.id.clone() }));
             }
-
-            let externals: Vec<&MonitorInfo> = self.connected.iter().filter(|m| !m.internal).collect();
-            if !externals.is_empty() {
-                add(menu, MF_SEPARATOR, "", None);
-                for m in externals {
-                    let pm = self.active_profile().and_then(|p| p.monitor(&m.id));
-                    let name = pm.map(|p| p.name.clone()).unwrap_or_else(|| m.display_name().to_string());
-                    let inputs = match pm {
-                        Some(p) if !p.supported_inputs.is_empty() => p.supported_inputs.clone(),
-                        _ => monitors::COMMON_INPUTS.to_vec(),
-                    };
-                    let sub = CreatePopupMenu();
-                    for code in inputs {
-                        add(sub, MF_STRING, &monitors::long_name(code), Some(MenuAction::SetInput(m.clone(), code)));
-                    }
-                    AppendMenuW(menu, MF_POPUP, sub as usize, wide(&format!("Switch {name} to")).as_ptr());
-                }
-            }
-
-            add(menu, MF_SEPARATOR, "", None);
-            let configure = add(menu, MF_STRING, "Configure…", Some(MenuAction::Configure));
-            SetMenuDefaultItem(menu, configure as u32, 0);
-            add(menu, MF_STRING, "Re-detect displays", Some(MenuAction::Redetect));
-            let startup = if sys::startup_enabled() { MF_CHECKED } else { 0 };
-            add(menu, MF_STRING | startup, "Start with Windows", Some(MenuAction::ToggleStartup));
-            add(menu, MF_STRING, "Open config folder", Some(MenuAction::OpenFolder));
-            add(menu, MF_SEPARATOR, "", None);
-            add(menu, MF_STRING | MF_GRAYED, &format!("InputSwitch {}", sys::VERSION), None);
-            add(menu, MF_STRING, "Exit", Some(MenuAction::Exit));
-            (menu, actions)
         }
-    }
 
+        let externals: Vec<&MonitorInfo> = self.connected.iter().filter(|m| !m.internal).collect();
+        if !externals.is_empty() {
+            add(menu, MF_SEPARATOR, "", None);
+            for m in externals {
+                let known = active.and_then(|p| p.monitor(&m.id));
+                let name = known.map_or_else(|| m.display_name().to_string(), |k| k.name.clone());
+                let inputs = match known {
+                    Some(k) if !k.supported_inputs.is_empty() => k.supported_inputs.clone(),
+                    _ => monitors::COMMON_INPUTS.to_vec(),
+                };
+                let sub = unsafe { CreatePopupMenu() };
+                for code in inputs {
+                    add(sub, MF_STRING, &monitors::long_name(code), Some(MenuAction::SetInput(m.clone(), code)));
+                }
+                unsafe { AppendMenuW(menu, MF_POPUP, sub as usize, wide(&format!("Switch {name} to")).as_ptr()) };
+            }
+        }
+
+        add(menu, MF_SEPARATOR, "", None);
+        let configure = add(menu, MF_STRING, "Configure…", Some(MenuAction::Configure));
+        unsafe { SetMenuDefaultItem(menu, configure as u32, 0) };
+        add(menu, MF_STRING, "Re-detect displays", Some(MenuAction::Redetect));
+        let startup = if sys::startup_enabled() { MF_CHECKED } else { 0 };
+        add(menu, MF_STRING | startup, "Start with Windows", Some(MenuAction::ToggleStartup));
+        add(menu, MF_STRING, "Open config folder", Some(MenuAction::OpenFolder));
+        add(menu, MF_SEPARATOR, "", None);
+        add(menu, MF_STRING | MF_GRAYED, &format!("InputSwitch {}", sys::VERSION), None);
+        add(menu, MF_STRING, "Exit", Some(MenuAction::Exit));
+        (menu, actions)
+    }
     fn run_menu(&mut self, action: MenuAction) {
         match action {
-            MenuAction::Run(i) => self.run_binding(i),
+            MenuAction::Run { profile, binding } => {
+                let index = self.active_profile().filter(|p| p.id == profile).and_then(|p| p.bindings.iter().position(|b| b.id == binding));
+                if let Some(index) = index {
+                    self.run_binding(index);
+                }
+            }
             MenuAction::SetInput(m, code) => {
                 std::thread::spawn(move || {
                     if let Err(e) = monitors::switch_to(&m, code) {
@@ -519,7 +538,9 @@ impl Tray {
             }
             MenuAction::Redetect => self.evaluate(false),
             MenuAction::ToggleStartup => {
-                sys::set_startup(!sys::startup_enabled());
+                if !sys::set_startup(!sys::startup_enabled()) {
+                    self.notify("Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.", NIIF_WARNING, OnClick::Nothing);
+                }
             }
             MenuAction::OpenFolder => {
                 let dir = config::dir();

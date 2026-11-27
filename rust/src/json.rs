@@ -11,7 +11,8 @@ pub enum Json {
 }
 
 impl Json {
-    /// Object member by name (case-insensitive, like the C# app's reader is lenient about).
+    /// Object member by name. Matched ignoring case, to be forgiving of hand edits (both apps
+    /// write the same PascalCase names).
     pub fn get(&self, key: &str) -> Option<&Json> {
         match self {
             Json::Obj(m) => m.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v),
@@ -48,7 +49,7 @@ impl Json {
 
 pub fn parse(text: &str) -> Result<Json, String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut p = Parser { b: text.as_bytes(), i: 0 };
+    let mut p = Parser { b: text.as_bytes(), i: 0, depth: 0 };
     let v = p.value()?;
     p.ws();
     if p.i != p.b.len() {
@@ -57,9 +58,14 @@ pub fn parse(text: &str) -> Result<Json, String> {
     Ok(v)
 }
 
+/// How deeply arrays and objects may nest (System.Text.Json's default), so a damaged file can't
+/// overflow the stack.
+const MAX_DEPTH: usize = 64;
+
 struct Parser<'a> {
     b: &'a [u8],
     i: usize,
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -94,8 +100,21 @@ impl Parser<'_> {
 
     fn value(&mut self) -> Result<Json, String> {
         self.ws();
+        if matches!(self.b.get(self.i), Some(b'{' | b'[')) {
+            if self.depth == MAX_DEPTH {
+                return Err(self.err("nested too deeply"));
+            }
+            self.depth += 1;
+            let v = self.container();
+            self.depth -= 1;
+            return v;
+        }
+        self.scalar()
+    }
+
+    /// An object or an array.
+    fn container(&mut self) -> Result<Json, String> {
         match self.b.get(self.i) {
-            None => Err(self.err("unexpected end")),
             Some(b'{') => {
                 self.i += 1;
                 let mut members = Vec::new();
@@ -141,6 +160,13 @@ impl Parser<'_> {
                     }
                 }
             }
+            _ => unreachable!("container() is only called at '{{' or '['"),
+        }
+    }
+
+    fn scalar(&mut self) -> Result<Json, String> {
+        match self.b.get(self.i) {
+            None => Err(self.err("unexpected end")),
             Some(b'"') => Ok(Json::Str(self.string()?)),
             Some(b't') => self.literal("true", Json::Bool(true)),
             Some(b'f') => self.literal("false", Json::Bool(false)),
@@ -192,10 +218,17 @@ impl Parser<'_> {
                         b't' => '\t',
                         b'u' => {
                             let mut cp = self.hex4()?;
+                            // A high surrogate pairs with a following low one; anything else is
+                            // left alone (and the lone surrogate becomes U+FFFD).
                             if (0xD800..0xDC00).contains(&cp) && self.b[self.i..].starts_with(b"\\u") {
+                                let after_high = self.i;
                                 self.i += 2;
                                 let lo = self.hex4()?;
-                                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF);
+                                if (0xDC00..0xE000).contains(&lo) {
+                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                } else {
+                                    self.i = after_high;
+                                }
                             }
                             char::from_u32(cp).unwrap_or('\u{fffd}')
                         }
@@ -316,5 +349,16 @@ mod tests {
         assert!(parse("{").is_err());
         assert!(parse("[1,]").is_err());
         assert!(parse("{\"a\": 1} x").is_err());
+    }
+
+    #[test]
+    fn a_lone_high_surrogate_keeps_what_follows() {
+        assert_eq!(parse(r#""\ud800A""#).unwrap(), Json::Str("\u{fffd}A".into()));
+    }
+
+    #[test]
+    fn deep_nesting_is_an_error_not_a_crash() {
+        assert!(parse(&"[".repeat(10_000)).is_err());
+        assert!(parse(&format!("{}{}", "[".repeat(64), "]".repeat(64))).is_ok());
     }
 }

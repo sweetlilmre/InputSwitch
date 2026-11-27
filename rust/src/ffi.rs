@@ -636,6 +636,7 @@ extern "system" {
 #[link(name = "bcrypt")]
 extern "system" {
     pub fn BCryptGenRandom(alg: isize, buf: *mut u8, len: u32, flags: u32) -> i32;
+    pub fn BCryptHash(alg: isize, secret: *const u8, secret_len: u32, input: *const u8, input_len: u32, output: *mut u8, output_len: u32) -> i32;
 }
 
 pub fn hinstance() -> HINSTANCE {

@@ -29,6 +29,7 @@ fn main() {
     // crash.txt in the settings folder instead.
     std::panic::set_hook(Box::new(|info| {
         let text = format!("{}\n\n{info}\n\n{}", sys::display_version(), std::backtrace::Backtrace::force_capture());
+        let _ = std::fs::create_dir_all(config::dir());
         let _ = std::fs::write(config::dir().join("crash.txt"), text);
     }));
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -47,6 +48,7 @@ fn main() {
 
         // One instance per config folder: a test copy with its own folder can run beside the real one.
         let name = wide(&format!(r"Local\InputSwitch-6d3f0b8e{}", config::instance_key()));
+        // Never closed: holding it for the app's lifetime is what keeps a second copy out.
         CreateMutexW(core::ptr::null(), 1, name.as_ptr());
         if GetLastError() == ERROR_ALREADY_EXISTS {
             ui::dialog::alert(0, ui::dialog::Icon::Info, "InputSwitch is already running",

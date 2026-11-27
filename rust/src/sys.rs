@@ -7,7 +7,13 @@ use crate::registry::RegKey;
 pub fn new_id() -> String {
     const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 2;
     let mut b = [0u8; 16];
-    unsafe { BCryptGenRandom(0, b.as_mut_ptr(), b.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    if unsafe { BCryptGenRandom(0, b.as_mut_ptr(), b.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } != 0 {
+        // Never all zeros (ids must differ): the time and a counter instead.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+        b[..8].copy_from_slice(&now.to_le_bytes());
+        b[8..].copy_from_slice(&COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed).to_le_bytes());
+    }
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 

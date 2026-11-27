@@ -3,6 +3,7 @@
 use crate::hotkey::Hotkey;
 use crate::json::{self, Json};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppConfig {
@@ -129,7 +130,8 @@ impl Profile {
             ("Id".into(), s(&self.id)),
             ("Name".into(), s(&self.name)),
             ("Enabled".into(), Json::Bool(self.enabled)),
-            ("CreatedUtc".into(), s(&self.created_utc)),
+            // The C# app can't read a blank date.
+            ("CreatedUtc".into(), if self.created_utc.trim().is_empty() { s(&crate::sys::utc_now()) } else { s(&self.created_utc) }),
             ("Monitors".into(), Json::Arr(self.monitors.iter().map(|m| Json::Obj(vec![
                 ("MonitorId".into(), s(&m.monitor_id)),
                 ("Name".into(), s(&m.name)),
@@ -183,7 +185,10 @@ fn override_dir() -> Option<PathBuf> {
 /// %APPDATA%\InputSwitch, or the folder in INPUTSWITCH_CONFIG_DIR (used by the smoke tests).
 pub fn dir() -> PathBuf {
     override_dir().unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("InputSwitch")
+        let app_data = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(r"AppData\Roaming")
+        });
+        app_data.join("InputSwitch")
     })
 }
 
@@ -191,45 +196,100 @@ pub fn file_path() -> PathBuf {
     dir().join("config.json")
 }
 
-/// Distinguishes instances using different config folders (so a test copy can run beside the
-/// real one). Empty for the normal location.
+fn backup_path() -> PathBuf {
+    dir().join("config.json.bad")
+}
+
+/// Distinguishes instances using different config folders, so a test copy can run beside the
+/// real one: "-" and the first 12 hex digits of the folder's SHA-256, exactly as the C# app makes
+/// it (so the two apps also keep each other out of the same folder). Empty for the normal location.
 pub fn instance_key() -> String {
-    match override_dir() {
-        None => String::new(),
-        Some(d) => {
-            // FNV-1a: enough to tell folders apart.
-            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-            for b in d.to_string_lossy().to_lowercase().bytes() {
-                h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
-            }
-            format!("-{:012x}", h & 0xFFFF_FFFF_FFFF)
+    let Some(d) = override_dir() else { return String::new() };
+    let bytes = d.to_string_lossy().to_lowercase().into_bytes();
+    let mut hash = [0u8; 32];
+    const BCRYPT_SHA256_ALG_HANDLE: isize = 0x41;
+    unsafe { crate::ffi::BCryptHash(BCRYPT_SHA256_ALG_HANDLE, core::ptr::null(), 0, bytes.as_ptr(), bytes.len() as u32, hash.as_mut_ptr(), 32) };
+    format!("-{}", hash.iter().take(6).map(|b| format!("{b:02X}")).collect::<String>())
+}
+
+/// Set when the settings file exists but couldn't be read or backed up: then it's never
+/// overwritten, so nothing is lost (saves report an error instead).
+static KEEP_FILE: AtomicBool = AtomicBool::new(false);
+
+/// Loads the settings. If the file exists but can't be read, it's kept (as config.json.bad, or
+/// left untouched) and the problem is returned alongside fresh settings.
+pub fn load() -> (AppConfig, Option<String>) {
+    let path = file_path();
+    let bytes = match read_with_retries(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (AppConfig::default(), None),
+        Err(e) => {
+            KEEP_FILE.store(true, Ordering::Relaxed);
+            return (AppConfig::default(), Some(format!("{e}. The file was left as it is; changes won't be saved this session.")));
+        }
+    };
+    match json::parse(&decode(&bytes)) {
+        Ok(v) => (AppConfig::from_json(&v), None),
+        Err(e) => {
+            let kept = std::fs::copy(&path, backup_path()).is_ok();
+            KEEP_FILE.store(!kept, Ordering::Relaxed);
+            let note = if kept { format!("The unreadable file was kept as config.json.bad in {}.", dir().display()) } else { "Changes won't be saved this session.".into() };
+            (AppConfig::default(), Some(format!("{e}. {note}")))
         }
     }
 }
 
-/// Loads the settings. If the file exists but can't be read, it's kept as config.json.bad and
-/// the error is returned alongside fresh settings.
-pub fn load() -> (AppConfig, Option<String>) {
-    let path = file_path();
-    let Ok(text) = std::fs::read_to_string(&path) else { return (AppConfig::default(), None) };
-    match json::parse(&text) {
-        Ok(v) => (AppConfig::from_json(&v), None),
-        Err(e) => {
-            let _ = std::fs::copy(&path, path.with_extension("json.bad"));
-            (AppConfig::default(), Some(e))
+/// Reads the file, retrying briefly: antivirus and sync tools can hold it open at sign-in.
+fn read_with_retries(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut result = std::fs::read(path);
+    for _ in 0..5 {
+        match &result {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => std::thread::sleep(std::time::Duration::from_millis(200)),
+            _ => break,
         }
+        result = std::fs::read(path);
+    }
+    result
+}
+
+/// The file's text: UTF-8 (with or without a byte order mark), UTF-16 with a byte order mark
+/// (Notepad's "Unicode"), or else Windows-1252 (Notepad's "ANSI").
+fn decode(bytes: &[u8]) -> String {
+    let utf16 = |be: bool| {
+        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| if be { u16::from_be_bytes([c[0], c[1]]) } else { u16::from_le_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        _ => match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => bytes.iter().map(|&b| windows_1252(b)).collect(),
+        },
+    }
+}
+
+fn windows_1252(b: u8) -> char {
+    const HIGH: [char; 32] = ['€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}',
+        '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ'];
+    match b {
+        0x80..=0x9F => HIGH[(b - 0x80) as usize],
+        _ => b as char,
     }
 }
 
 /// Saves atomically: write a temporary file, then replace.
 pub fn save(cfg: &AppConfig) -> std::io::Result<()> {
+    if KEEP_FILE.load(Ordering::Relaxed) {
+        return Err(std::io::Error::other("The settings file couldn't be read when InputSwitch started, so it isn't overwritten. Restart InputSwitch to try again."));
+    }
     std::fs::create_dir_all(dir())?;
     let path = file_path();
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json::write(&cfg.to_json()))?;
     std::fs::rename(&tmp, &path)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,5 +339,24 @@ mod tests {
         assert_eq!(parse(r#"{ }"#), Theme::System);
         assert_eq!(parse(r#"{ "Theme": "light" }"#), Theme::Light);
         assert_eq!(parse(r#"{ "Theme": "Sepia" }"#), Theme::System);
+    }
+
+    #[test]
+    fn reads_the_encodings_notepad_saves() {
+        let json = "{\"Profiles\": [ { \"Name\": \"Büro\" } ]}";
+        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain(json.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        let bom: Vec<u8> = [0xEF, 0xBB, 0xBF].iter().copied().chain(json.bytes()).collect();
+        let ansi: Vec<u8> = json.chars().map(|c| if c == 'ü' { 0xFC } else { c as u8 }).collect();
+        for bytes in [json.as_bytes().to_vec(), bom, utf16, ansi] {
+            let cfg = AppConfig::from_json(&json::parse(&decode(&bytes)).unwrap());
+            assert_eq!(cfg.profiles[0].name, "Büro");
+        }
+    }
+
+    #[test]
+    fn never_writes_a_blank_date() {
+        let mut p = Profile::from_json(&json::parse(r#"{ "Name": "x" }"#).unwrap());
+        p.created_utc = String::new();
+        assert!(p.to_json().str("CreatedUtc").is_some_and(|d| d.ends_with('Z')));
     }
 }
