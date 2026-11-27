@@ -27,6 +27,8 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     /// <summary>Commits typed names once typing pauses, rather than on every keystroke.</summary>
     private readonly System.Windows.Threading.DispatcherTimer _typingTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private bool _detecting;
+    /// <summary>A detection asked for while one was running (its force flag); it runs when that one finishes.</summary>
+    private bool? _detectQueued;
     private bool _loading;
 
     public event Action<AppConfig>? Changed;
@@ -262,6 +264,8 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         }
 
         foreach (var m in missing)
+            _detectAttempted.Remove(m.Id); // always read what was just added
+        foreach (var m in missing)
             p.Monitors.Add(new ProfileMonitor { MonitorId = m.Id, Name = m.DisplayName, Model = m.Model, Serial = m.Serial });
         Commit();
         RefreshSelectedRow();
@@ -295,7 +299,12 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
     /// <summary>Reads each connected monitor's capabilities and current input over DDC/CI (slow, so off the UI thread).</summary>
     private async Task DetectInputs(bool force)
     {
-        if (_detecting || SelectedProfile is not { } profile) return;
+        if (_detecting)
+        {
+            _detectQueued = force || _detectQueued == true;
+            return;
+        }
+        if (SelectedProfile is not { } profile) return;
 
         var targets = profile.Monitors
             .Select(pm => (pm, info: Connected(pm.MonitorId)))
@@ -334,6 +343,11 @@ internal sealed partial class ConfigWindow : Window, ISettingsWindow
         finally
         {
             _detecting = false;
+        }
+        if (_detectQueued is { } queued && IsLoaded)
+        {
+            _detectQueued = null;
+            await DetectInputs(queued);
         }
     }
 
