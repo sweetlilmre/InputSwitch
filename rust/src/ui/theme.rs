@@ -66,8 +66,6 @@ pub struct Palette {
     /// A chip or key cap on a row (ControlFillColorSecondary) and its border.
     pub chip: u32,
     pub chip_stroke: u32,
-    /// The hotkey box while it's recording.
-    pub listening: u32,
     /// The selected configuration in the list.
     pub selected: u32,
     // Text.
@@ -97,7 +95,7 @@ fn make_palette(dark: bool, accent: u32) -> Palette {
             control: rgb(55, 55, 55), control_hot: rgb(62, 62, 62), control_pressed: rgb(48, 48, 48), control_stroke: rgb(75, 75, 75),
             field: on_card(0.09), field_stroke: on_card(0.08), field_underline: on_card(0.55),
             chip: on_card(0.11), chip_stroke: on_card(0.13),
-            listening: mix(rgb(55, 55, 55), accent, 0.25), selected: rgb(58, 58, 58),
+            selected: rgb(58, 58, 58),
             text: WHITE, text2: rgb(200, 200, 200), text_disabled: rgb(120, 120, 120),
             accent, accent_hot: mix(accent, WHITE, 0.15), on_accent: BLACK,
             success: rgb(57, 61, 27), caution: rgb(67, 53, 25), neutral: rgb(50, 50, 50),
@@ -113,7 +111,7 @@ fn make_palette(dark: bool, accent: u32) -> Palette {
             control: rgb(253, 253, 253), control_hot: rgb(246, 246, 246), control_pressed: rgb(240, 240, 240), control_stroke: rgb(208, 208, 208),
             field: WHITE, field_stroke: on_card(0.07), field_underline: on_card(0.45),
             chip: rgb(249, 249, 249), chip_stroke: on_card(0.07),
-            listening: mix(WHITE, accent, 0.12), selected: rgb(234, 234, 234),
+            selected: rgb(234, 234, 234),
             text: rgb(26, 26, 26), text2: rgb(96, 96, 96), text_disabled: rgb(160, 160, 160),
             accent, accent_hot: mix(accent, BLACK, 0.1), on_accent: WHITE,
             success: rgb(223, 246, 221), caution: rgb(255, 244, 206), neutral: rgb(240, 240, 240),
@@ -217,11 +215,9 @@ pub fn apply_window(h: HWND) {
 
 #[derive(Clone, Copy)]
 pub enum ControlKind {
-    ListView,
     /// Also used for anything that only needs dark scroll bars.
     ListBox,
     Edit,
-    ComboBox,
 }
 
 /// Dark or light visual style for a common control, to match the palette.
@@ -230,51 +226,16 @@ pub fn apply_control(h: HWND, kind: ControlKind) {
     unsafe {
         allow_dark(h, p.dark);
         let theme = match (kind, p.dark) {
-            (ControlKind::Edit | ControlKind::ComboBox, true) => "DarkMode_CFD",
+            (ControlKind::Edit, true) => "DarkMode_CFD",
             (_, true) => "DarkMode_Explorer",
-            (ControlKind::Edit | ControlKind::ComboBox, false) => "CFD",
+            (ControlKind::Edit, false) => "CFD",
             (_, false) => "Explorer",
         };
         SetWindowTheme(h, wide(theme).as_ptr(), core::ptr::null());
-        if let ControlKind::ListView = kind {
-            SendMessageW(h, LVM_SETBKCOLOR, 0, p.card as LPARAM);
-            SendMessageW(h, LVM_SETTEXTBKCOLOR, 0, p.card as LPARAM);
-            SendMessageW(h, LVM_SETTEXTCOLOR, 0, p.text as LPARAM);
-            let header = SendMessageW(h, LVM_GETHEADER, 0, 0) as HWND;
-            if header != 0 {
-                let header_theme = if p.dark { "DarkMode_ItemsView" } else { "ItemsView" };
-                SetWindowTheme(header, wide(header_theme).as_ptr(), core::ptr::null());
-            }
-            // The dark header style keeps dark text: colour it ourselves (header notifications go
-            // to the list view, so it's subclassed).
-            SetWindowSubclass(h, listview_proc, LISTVIEW_SUBCLASS, 0);
-        }
         SendMessageW(h, WM_THEMECHANGED, 0, 0);
     }
 }
 
-const LISTVIEW_SUBCLASS: usize = 7;
-
-unsafe extern "system" fn listview_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM, _id: usize, _data: usize) -> LRESULT {
-    if m == WM_NOTIFY {
-        let hdr = &*(l as *const NMHDR);
-        if hdr.code == NM_CUSTOMDRAW && hdr.hwndFrom == SendMessageW(h, LVM_GETHEADER, 0, 0) as HWND {
-            let cd = &*(l as *const NMCUSTOMDRAW);
-            match cd.dwDrawStage {
-                CDDS_PREPAINT => return CDRF_NOTIFYITEMDRAW,
-                CDDS_ITEMPREPAINT => {
-                    SetTextColor(cd.hdc, palette().text2);
-                    return CDRF_DODEFAULT;
-                }
-                _ => {}
-            }
-        }
-    }
-    if m == WM_NCDESTROY {
-        RemoveWindowSubclass(h, listview_proc, LISTVIEW_SUBCLASS);
-    }
-    DefSubclassProc(h, m, w, l)
-}
 
 /// Records what a control sits on, and whether its text is secondary (greyer).
 pub fn set_surface(h: HWND, surface: Surface, secondary: bool) {

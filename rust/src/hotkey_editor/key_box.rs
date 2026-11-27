@@ -15,7 +15,7 @@ const WM_WIN_CHANGED: u32 = WM_APP + 10;
 const PLACEHOLDER_LISTENING: &str = "Press the keys now…";
 const PLACEHOLDER_IDLE: &str = "Click here to record a key combination";
 const HINT_LISTENING: &str = "Listening — press the keys now. Win shortcuts are captured while this box is selected. Backspace clears it.";
-const HINT_IDLE: &str = "Click the box to record a key combination.";
+const HINT_IDLE: &str = "Click the box and press the keys. Use Ctrl, Alt or Win with a key (or F13–F24). Backspace clears it.";
 
 static BOX: AtomicIsize = AtomicIsize::new(0);
 static HINT: AtomicIsize = AtomicIsize::new(0);
@@ -75,7 +75,7 @@ fn current_mods() -> u8 {
 /// Creates the box as a child of `parent` with the given control id and font. `hint` is a label
 /// that's kept up to date with whether the box is listening.
 pub fn create(parent: HWND, id: i32, font: HFONT, initial: Hotkey, hint: HWND) -> HWND {
-    // No border: the editor paints a rounded frame around it (accent-coloured while listening).
+    // No border: the editor paints a text box frame around it (with an accent underline while listening).
     let h = crate::ui::child(parent, "EDIT", "", ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, 0, id, font);
     CAPTURED.with(|c| c.set(initial));
     BOX.store(h, Ordering::Relaxed);
@@ -97,10 +97,9 @@ pub fn is_raw_key(msg: &MSG) -> bool {
     b != 0 && msg.hwnd == b && !(msg.message == WM_KEYDOWN && is_dialog_key(msg.wParam as u16, current_mods()))
 }
 
-/// The box's background: tinted while listening, otherwise the normal input colour.
-pub fn background() -> u32 {
-    let p = crate::ui::theme::palette();
-    if LISTENING.load(Ordering::Relaxed) { p.listening } else { p.control }
+/// The box's background: a text box's (its accent underline shows it's recording).
+fn background() -> u32 {
+    crate::ui::theme::palette().field
 }
 
 pub fn is_listening() -> bool {

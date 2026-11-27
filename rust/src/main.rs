@@ -41,7 +41,7 @@ fn main() {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: core::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES,
+            dwICC: ICC_STANDARD_CLASSES,
         };
         InitCommonControlsEx(&icc);
         ui::theme::reload();

@@ -81,7 +81,6 @@ pub const WM_SIZE: u32 = 0x0005;
 pub const WM_CLOSE: u32 = 0x0010;
 pub const WM_GETMINMAXINFO: u32 = 0x0024;
 pub const WM_SETFONT: u32 = 0x0030;
-pub const WM_NOTIFY: u32 = 0x004E;
 pub const WM_CONTEXTMENU: u32 = 0x007B;
 pub const WM_COMMAND: u32 = 0x0111;
 pub const WM_TIMER: u32 = 0x0113;

@@ -23,6 +23,7 @@ pub const ICON_MONITOR: char = '\u{E7F4}';
 pub const ICON_TICK: char = '\u{E73E}';
 pub const ICON_WARNING: char = '\u{E7BA}';
 pub const ICON_INFO: char = '\u{E946}';
+pub const ICON_KEYBOARD: char = '\u{E765}';
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -31,6 +32,9 @@ pub enum Kind {
     Check,
     /// A WinUI-style on/off toggle switch.
     Switch,
+    /// A drop-down field: the choice on the left, a chevron on the right. The parent shows the
+    /// choices when it's clicked (see [`choose`]).
+    DropDown,
 }
 
 struct Info {
@@ -56,6 +60,27 @@ fn create(parent: HWND, text: &str, id: i32, kind: Kind, icon: Option<char>, fon
 
 pub fn button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
     create(parent, text, id, Kind::Standard, icon, fonts, surface)
+}
+
+/// A drop-down field showing `text` (the current choice).
+pub fn drop_down(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface) -> HWND {
+    create(parent, text, id, Kind::DropDown, None, fonts, surface)
+}
+
+/// Shows choices in a menu under drop-down h, the current one ticked. Returns the one picked.
+pub fn choose(h: HWND, choices: &[String], current: Option<usize>) -> Option<usize> {
+    let mut r = RECT::default();
+    unsafe {
+        GetWindowRect(h, &mut r);
+        let menu = CreatePopupMenu();
+        for (i, c) in choices.iter().enumerate() {
+            let checked = if Some(i) == current { MF_CHECKED } else { 0 };
+            AppendMenuW(menu, MF_STRING | checked, i + 1, wide(c).as_ptr());
+        }
+        let picked = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, r.left, r.bottom, 0, GetParent(h), core::ptr::null());
+        DestroyMenu(menu);
+        (picked > 0).then(|| picked as usize - 1)
+    }
 }
 
 pub fn accent_button(parent: HWND, text: &str, id: i32, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
@@ -224,7 +249,13 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
     };
     draw::round_rect(hdc, r, s(4), fill, border);
 
-    // Icon and text, centred together.
+    if kind == Kind::DropDown {
+        let chevron = RECT { left: r.right - s(12 + 16), right: r.right - s(12), ..r };
+        draw::glyph(hdc, ICON_DOWN, chevron, icon_font, fg, DT_CENTER | DT_VCENTER);
+        let label = RECT { left: r.left + s(12), right: chevron.left - s(8), ..r };
+        draw::text(hdc, &text, label, font, fg, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    } else {
+        // Icon and text, centred together.
     let gap = s(8);
     let text_w = draw::text_width(&text, font);
     let icon_w = if icon.is_some() { s(16) } else { 0 };
@@ -236,6 +267,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         x += icon_w + gap;
     }
     draw::text(hdc, &text, RECT { left: x, top: r.top, right: r.right - s(4), bottom: r.bottom }, font, fg, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
 
     if focused {
         let f = RECT { left: r.left + s(2), top: r.top + s(2), right: r.right - s(2), bottom: r.bottom - s(2) };
