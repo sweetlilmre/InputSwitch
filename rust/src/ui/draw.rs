@@ -4,22 +4,28 @@
 use super::theme::brush;
 use crate::ffi::*;
 
-/// Pass as the fill to [`round_rect`] to draw only the border.
-pub const NO_FILL: u32 = u32::MAX;
-
 pub fn fill(hdc: HDC, r: RECT, color: u32) {
     unsafe { FillRect(hdc, &r, brush(color)) };
 }
 
 /// Fills a rounded rectangle, optionally with a 1-pixel border.
 pub fn round_rect(hdc: HDC, r: RECT, radius: i32, fill: u32, border: Option<u32>) {
+    rounded(hdc, r, radius, Some(fill), border);
+}
+
+/// A rounded rectangle's 1-pixel outline (a focus ring).
+pub fn outline(hdc: HDC, r: RECT, radius: i32, color: u32) {
+    rounded(hdc, r, radius, None, Some(color));
+}
+
+fn rounded(hdc: HDC, r: RECT, radius: i32, fill: Option<u32>, border: Option<u32>) {
     unsafe {
         let pen = match border {
             Some(c) => CreatePen(PS_SOLID, 1, c),
             None => GetStockObject(NULL_PEN),
         };
         let old_pen = SelectObject(hdc, pen);
-        let fill_brush = if fill == NO_FILL { GetStockObject(NULL_BRUSH) } else { brush(fill) };
+        let fill_brush = fill.map_or_else(|| GetStockObject(NULL_BRUSH), brush);
         let old_brush = SelectObject(hdc, fill_brush);
         // RoundRect leaves out the right and bottom edge when there's no pen: add it back.
         let extra = if border.is_none() { 1 } else { 0 };

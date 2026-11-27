@@ -25,6 +25,7 @@ mod ffi;
 use ffi::*;
 
 fn main() {
+    ui::set_app_name(sys::APP_NAME);
     // A windowed app has nowhere to print a panic, so a crash would be silent: write it to
     // crash.txt in the settings folder instead.
     std::panic::set_hook(Box::new(|info| {

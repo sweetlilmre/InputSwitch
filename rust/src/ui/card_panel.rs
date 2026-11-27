@@ -13,14 +13,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-const CLASS: &str = "InputSwitch.CardPanel";
+const CLASS: &str = "ui.CardPanel";
 
 /// What a [`Cards`] implementation gets to work with.
 pub struct Ctx {
     /// The panel: the parent for the cards' controls.
     pub panel: HWND,
     pub dpi: u32,
-    pub fonts: Fonts,
+    /// The parent window's fonts.
+    pub fonts: Rc<Fonts>,
 }
 
 impl Ctx {
@@ -30,15 +31,16 @@ impl Ctx {
     }
 }
 
-pub trait Cards: 'static {
-    /// Lays the cards out for a panel `width` pixels wide, starting at y = 0, and returns
-    /// their total height.
+/// The cards a panel shows. Positions are in panel pixels, laid out from y = 0; the panel
+/// scrolls by shifting them up by `dy`.
+pub trait Cards: Any {
+    /// Lays the cards out for a panel `width` pixels wide and returns their total height.
     fn layout(&mut self, cx: &Ctx, width: i32) -> i32;
 
-    /// Moves the cards' controls to where they are with the panel scrolled by `dy` pixels.
+    /// Moves the cards' controls to where they are with the panel scrolled by `dy`.
     fn place_controls(&mut self, cx: &Ctx, dy: i32);
 
-    /// Paints the cards, shifted up by `dy` pixels (the background is already filled).
+    /// Paints the cards, shifted up by `dy` (the background is already filled).
     fn paint(&self, cx: &Ctx, hdc: HDC, dy: i32);
 
     /// A notification from one of the cards' controls, before it goes on to the parent.
@@ -47,7 +49,13 @@ pub trait Cards: 'static {
         false
     }
 
-    /// The card holding `control` (unscrolled), to keep it in view when it gets focus.
+    /// A click on the panel itself (not on a control), at `y` (unscrolled). Returns true if the
+    /// cards need repainting.
+    fn on_click(&mut self, _cx: &Ctx, _x: i32, _y: i32) -> bool {
+        false
+    }
+
+    /// The card holding `control` (unscrolled), so it can be scrolled into view when it gets focus.
     fn card_of(&self, _control: HWND) -> Option<RECT> {
         None
     }
@@ -59,101 +67,62 @@ pub trait Cards: 'static {
     fn retheme(&mut self, _cx: &Ctx) {}
 }
 
-/// A panel's state; `T` is known only to the code that created it.
-struct Panel<T> {
+struct Panel {
     cx: Ctx,
-    cards: T,
+    cards: Box<dyn Cards>,
     scroll: i32,
     content_h: i32,
 }
 
-/// The type-independent side of a panel, for the window procedure.
-trait AnyPanel {
-    fn as_any(&mut self) -> &mut dyn Any;
-    fn layout(&mut self);
-    fn paint(&self, hdc: HDC);
-    fn on_command(&mut self, control: HWND, code: u16) -> bool;
-    /// Scrolls so `control`'s card is fully in view.
-    fn reveal(&mut self, control: HWND);
-    fn scroll_by(&mut self, dy: i32);
-    fn scroll_to(&mut self, y: i32);
-    fn scroll_info(&self) -> (i32, i32);
-    fn set_dpi(&mut self, dpi: u32);
-    fn retheme(&mut self);
-}
-
-impl<T: Cards> AnyPanel for Panel<T> {
-    fn as_any(&mut self) -> &mut dyn Any {
-        self
+impl Panel {
+    fn view_height(&self) -> i32 {
+        draw::client_rect(self.cx.panel).height()
     }
 
+    /// Lays the cards out again (after they or the panel's width changed).
     fn layout(&mut self) {
-        let rc = draw::client_rect(self.cx.panel);
-        self.content_h = self.cards.layout(&self.cx, rc.width());
-        self.scroll = self.scroll.clamp(0, (self.content_h - rc.height()).max(0));
+        let width = draw::client_rect(self.cx.panel).width();
+        self.content_h = self.cards.layout(&self.cx, width);
+        self.scroll_to(self.scroll);
+    }
+
+    /// Scrolls to `y` (kept in range) and moves the controls to match.
+    fn scroll_to(&mut self, y: i32) {
+        self.scroll = y.clamp(0, (self.content_h - self.view_height()).max(0));
         self.cards.place_controls(&self.cx, self.scroll);
     }
 
-    fn paint(&self, hdc: HDC) {
-        draw::fill(hdc, draw::client_rect(self.cx.panel), theme::palette().card);
-        self.cards.paint(&self.cx, hdc, self.scroll);
-    }
-
-    fn on_command(&mut self, control: HWND, code: u16) -> bool {
-        self.cards.on_command(&self.cx, control, code)
-    }
-
+    /// Scrolls just enough for `control`'s card to be fully in view.
     fn reveal(&mut self, control: HWND) {
         let Some(card) = self.cards.card_of(control) else { return };
-        let view = draw::client_rect(self.cx.panel).height();
+        let view = self.view_height();
         if card.top < self.scroll {
-            self.scroll = card.top;
+            self.scroll_to(card.top);
         } else if card.bottom > self.scroll + view {
-            self.scroll = card.bottom - view;
+            self.scroll_to(card.bottom - view);
         }
-    }
-
-    fn scroll_by(&mut self, dy: i32) {
-        self.scroll += dy;
-    }
-
-    fn scroll_to(&mut self, y: i32) {
-        self.scroll = y;
-    }
-
-    fn scroll_info(&self) -> (i32, i32) {
-        (self.content_h, self.scroll)
-    }
-
-    fn set_dpi(&mut self, dpi: u32) {
-        self.cx.dpi = dpi;
-        self.cx.fonts = Fonts::new(dpi);
-        self.cards.fonts_changed(&self.cx);
-    }
-
-    fn retheme(&mut self) {
-        self.cards.retheme(&self.cx);
     }
 }
 
-type Shared = Rc<RefCell<dyn AnyPanel>>;
+type Shared = Rc<RefCell<Panel>>;
 
 thread_local! {
     static PANELS: RefCell<HashMap<HWND, Shared>> = RefCell::new(HashMap::new());
 }
 
 /// The panel behind `h`, lent out unless it's already busy with a message further up the stack.
-fn with_panel<R>(h: HWND, f: impl FnOnce(&mut dyn AnyPanel) -> R) -> Option<R> {
+fn with_panel<R>(h: HWND, f: impl FnOnce(&mut Panel) -> R) -> Option<R> {
     let panel = PANELS.with(|p| p.borrow().get(&h).cloned())?;
     let mut panel = panel.try_borrow_mut().ok()?;
-    Some(f(&mut *panel))
+    Some(f(&mut panel))
 }
 
 // ------------------------------------------------------------------------------------------ public
 
-/// Creates a panel showing `cards`, as a child of `parent` with the given control id.
-pub fn create<T: Cards>(parent: HWND, id: i32, dpi: u32, cards: T) -> HWND {
-    super::register_class(CLASS, wndproc, 0, 0);
+/// Creates a panel showing `cards`, as a child of `parent` with the given control id, using the
+/// parent's fonts.
+pub fn create<T: Cards>(parent: HWND, id: i32, fonts: &Rc<Fonts>, cards: T) -> HWND {
+    super::register_class(CLASS, wndproc, false, 0);
     let h = unsafe {
         // Not WS_TABSTOP itself: a control parent that's also a tab stop sends dialog navigation
         // round in circles. The controls on the cards are the tab stops.
@@ -161,7 +130,8 @@ pub fn create<T: Cards>(parent: HWND, id: i32, dpi: u32, cards: T) -> HWND {
             WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_VSCROLL, 0, 0, 0, 0, parent, id as isize, hinstance(), core::ptr::null())
     };
     theme::apply_control(h, theme::ControlKind::ListBox); // dark scroll bar
-    let panel: Shared = Rc::new(RefCell::new(Panel { cx: Ctx { panel: h, dpi, fonts: Fonts::new(dpi) }, cards, scroll: 0, content_h: 0 }));
+    let cx = Ctx { panel: h, dpi: fonts.dpi, fonts: fonts.clone() };
+    let panel = Rc::new(RefCell::new(Panel { cx, cards: Box::new(cards), scroll: 0, content_h: 0 }));
     PANELS.with(|p| p.borrow_mut().insert(h, panel));
     h
 }
@@ -176,26 +146,34 @@ pub fn update<T: Cards, R>(h: HWND, f: impl FnOnce(&mut T, &Ctx) -> R) -> Option
 /// Looks at (or quietly changes) the cards without laying them out again.
 pub fn with<T: Cards, R>(h: HWND, f: impl FnOnce(&mut T, &Ctx) -> R) -> Option<R> {
     with_panel(h, |p| {
-        let panel = p.as_any().downcast_mut::<Panel<T>>()?;
-        Some(f(&mut panel.cards, &panel.cx))
+        let cards = (p.cards.as_mut() as &mut dyn Any).downcast_mut::<T>()?;
+        Some(f(cards, &p.cx))
     })
     .flatten()
 }
 
 /// The height the cards need, at 96 DPI (for the parent's layout).
 pub fn content_height(h: HWND) -> i32 {
-    let dpi = unsafe { GetDpiForWindow(h) }.max(96) as i32;
-    with_panel(h, |p| p.scroll_info().0).map_or(0, |px| (px * 96 + dpi - 1) / dpi)
+    with_panel(h, |p| {
+        let dpi = p.cx.dpi as i32;
+        (p.content_h * 96 + dpi - 1) / dpi
+    })
+    .unwrap_or(0)
 }
 
-pub fn set_dpi(h: HWND, dpi: u32) {
-    with_panel(h, |p| p.set_dpi(dpi));
+/// The parent's fonts changed (after a DPI change).
+pub fn set_fonts(h: HWND, fonts: &Rc<Fonts>) {
+    with_panel(h, |p| {
+        p.cx.dpi = fonts.dpi;
+        p.cx.fonts = fonts.clone();
+        p.cards.fonts_changed(&p.cx);
+    });
     relayout(h);
 }
 
 pub fn retheme(h: HWND) {
     theme::apply_control(h, theme::ControlKind::ListBox);
-    with_panel(h, |p| p.retheme());
+    with_panel(h, |p| p.cards.retheme(&p.cx));
     theme::repaint(h);
 }
 
@@ -206,7 +184,7 @@ pub fn retheme(h: HWND) {
 fn relayout(h: HWND) {
     for _ in 0..2 {
         let width = draw::client_rect(h).width();
-        with_panel(h, |p| p.layout());
+        with_panel(h, Panel::layout);
         update_scrollbar(h);
         if draw::client_rect(h).width() == width {
             break;
@@ -216,7 +194,7 @@ fn relayout(h: HWND) {
 }
 
 fn update_scrollbar(h: HWND) {
-    let Some((content, scroll)) = with_panel(h, |p| p.scroll_info()) else { return };
+    let Some((content, scroll)) = with_panel(h, |p| (p.content_h, p.scroll)) else { return };
     let si = SCROLLINFO {
         cbSize: core::mem::size_of::<SCROLLINFO>() as u32,
         fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
@@ -229,66 +207,74 @@ fn update_scrollbar(h: HWND) {
     unsafe { SetScrollInfo(h, SB_VERT, &si, 1) };
 }
 
-/// Changes the scroll position, then moves everything to match.
-fn scroll(h: HWND, f: impl FnOnce(&mut dyn AnyPanel)) {
-    with_panel(h, |p| {
-        f(p);
-        p.layout();
-    });
+/// Scrolls with `f`, then updates the scroll bar and repaints.
+fn scroll(h: HWND, f: impl FnOnce(&mut Panel)) {
+    with_panel(h, f);
     update_scrollbar(h);
     unsafe { InvalidateRect(h, core::ptr::null(), 0) };
 }
 
+/// Where the scroll bar's thumb is being dragged to (the full 32-bit position).
+fn thumb_position(h: HWND) -> i32 {
+    let mut si = SCROLLINFO { cbSize: core::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_TRACKPOS, nMin: 0, nMax: 0, nPage: 0, nPos: 0, nTrackPos: 0 };
+    unsafe { GetScrollInfo(h, SB_VERT, &mut si) };
+    si.nTrackPos
+}
+
 unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-    let s = |v: i32| super::scale(v, GetDpiForWindow(h).max(96));
+    let s = |v: i32| super::scale(v, super::dpi_of(h));
     match m {
         WM_ERASEBKGND => return 1,
         WM_PAINT => {
             draw::paint_buffered(h, |hdc, rc| {
-                if with_panel(h, |p| p.paint(hdc)).is_none() {
-                    draw::fill(hdc, rc, theme::palette().card);
-                }
+                draw::fill(hdc, rc, theme::palette().card);
+                with_panel(h, |p| p.cards.paint(&p.cx, hdc, p.scroll));
             });
             return 0;
         }
         WM_SIZE => relayout(h),
         WM_VSCROLL => {
-            let (page, line, thumb) = (draw::client_rect(h).height(), s(40), hiword(w) as i32);
-            scroll(h, |p| match loword(w) as u32 {
-                SB_LINEUP => p.scroll_by(-line),
-                SB_LINEDOWN => p.scroll_by(line),
-                SB_PAGEUP => p.scroll_by(-page),
-                SB_PAGEDOWN => p.scroll_by(page),
-                SB_THUMBPOSITION | SB_THUMBTRACK => p.scroll_to(thumb),
+            let (page, line) = (draw::client_rect(h).height(), s(40));
+            let code = loword(w) as u32;
+            let thumb = matches!(code, SB_THUMBPOSITION | SB_THUMBTRACK).then(|| thumb_position(h));
+            scroll(h, |p| match code {
+                SB_LINEUP => p.scroll_to(p.scroll - line),
+                SB_LINEDOWN => p.scroll_to(p.scroll + line),
+                SB_PAGEUP => p.scroll_to(p.scroll - page),
+                SB_PAGEDOWN => p.scroll_to(p.scroll + page),
                 SB_TOP => p.scroll_to(0),
                 SB_BOTTOM => p.scroll_to(i32::MAX / 2),
-                _ => {}
+                _ => thumb.into_iter().for_each(|y| p.scroll_to(y)),
             });
             return 0;
         }
         WM_MOUSEWHEEL => {
             let notches = (hiword(w) as i16) as i32; // WHEEL_DELTA (120) per notch
-            scroll(h, |p| p.scroll_by(-notches * s(48) / 120));
+            scroll(h, |p| p.scroll_to(p.scroll - notches * s(48) / 120));
+            return 0;
+        }
+        WM_LBUTTONDOWN => {
+            let (x, y) = ((l & 0xFFFF) as i16 as i32, ((l >> 16) & 0xFFFF) as i16 as i32);
+            if with_panel(h, |p| p.cards.on_click(&p.cx, x, y + p.scroll)) == Some(true) {
+                InvalidateRect(h, core::ptr::null(), 0);
+            }
             return 0;
         }
         WM_COMMAND => {
             let (control, code) = (l as HWND, hiword(w));
-            if with_panel(h, |p| p.on_command(control, code)) == Some(true) {
+            if with_panel(h, |p| p.cards.on_command(&p.cx, control, code)) == Some(true) {
                 relayout(h);
             }
-            if code == EN_SETFOCUS || code == EN_KILLFOCUS {
-                if code == EN_SETFOCUS {
-                    scroll(h, |p| p.reveal(control)); // e.g. tabbing to a card out of view
-                }
+            if matches!(code, EN_SETFOCUS | BN_SETFOCUS) {
+                scroll(h, |p| p.reveal(control)); // e.g. tabbing to a card out of view
+            }
+            if matches!(code, EN_SETFOCUS | EN_KILLFOCUS) {
                 InvalidateRect(h, core::ptr::null(), 0); // focus changes how a text box looks
             }
             return SendMessageW(GetParent(h), WM_COMMAND, w, l);
         }
         WM_DRAWITEM if widgets::draw(&*(l as *const DRAWITEMSTRUCT)) => return 1,
-        WM_CTLCOLOREDIT => {
-            let p = theme::palette();
-            return theme::colour_control(w as HDC, p.text, p.field);
-        }
+        WM_CTLCOLOREDIT => return super::text_box::edit_colors(w as HDC, l as HWND),
         WM_NCDESTROY => {
             PANELS.with(|p| p.borrow_mut().remove(&h));
         }

@@ -1,19 +1,24 @@
-//! The hotkey editor's inputs: one row per input with a check box, in the order the hotkey steps
-//! through them. The row last clicked is selected, for moving it up or down.
+//! The hotkey editor's inputs, like the C# app's list: one row per input with a check box, in
+//! the order the hotkey steps through them. Ticking is the check box's job; clicking a row (or
+//! tabbing to its check box) selects it, for moving it up or down.
 
 use crate::ffi::*;
 use crate::monitors;
 use crate::ui::card_panel::{self, Cards, Ctx};
 use crate::ui::draw::{self, rect, RectExt};
 use crate::ui::theme::{self, Surface};
-use crate::ui::{self, widgets};
+use crate::ui::{self, widgets, Fonts};
+use std::rc::Rc;
 
 /// The check boxes have ids from this base, plus the row.
 const CHECK_ID: i32 = 400;
 const MAX_ROWS: usize = 256;
 
+// At 96 DPI.
 const ROW_H: i32 = 56;
-const PAD_X: i32 = 10;
+const PAD_X: i32 = 14;
+const CHECK: i32 = 22;
+const LABEL_GAP: i32 = 10;
 
 struct Row {
     code: u8,
@@ -28,13 +33,13 @@ pub struct InputList {
     row_h: i32,
 }
 
-/// True if this notification is one of the check boxes being clicked.
+/// True if this notification is one of the check boxes being ticked or unticked.
 pub fn is_check(id: i32, code: u16) -> bool {
     code == BN_CLICKED && (CHECK_ID..CHECK_ID + MAX_ROWS as i32).contains(&id)
 }
 
-pub fn create(parent: HWND, id: i32, dpi: u32) -> HWND {
-    card_panel::create(parent, id, dpi, InputList { rows: Vec::new(), selected: None, width: 0, row_h: 0 })
+pub fn create(parent: HWND, id: i32, fonts: &Rc<Fonts>) -> HWND {
+    card_panel::create(parent, id, fonts, InputList { rows: Vec::new(), selected: None, width: 0, row_h: 0 })
 }
 
 /// Shows these inputs, in order, each ticked or not.
@@ -68,15 +73,14 @@ pub fn add(panel: HWND, code: u8) {
     });
 }
 
-/// Moves the selected input up (-1) or down (+1).
+/// Moves the selected input up (-1) or down (+1), ticked or not.
 pub fn move_selected(panel: HWND, delta: isize) {
     card_panel::update(panel, |l: &mut InputList, _| {
         let Some(i) = l.selected else { return };
         let Some(j) = i.checked_add_signed(delta).filter(|&j| j < l.rows.len()) else { return };
-        // Swap what the two rows show (their controls stay in place, keeping the tab order).
-        let (a, b) = (&l.rows[i], &l.rows[j]);
-        let (a_on, b_on) = (widgets::checked(a.check), widgets::checked(b.check));
-        let (a_code, b_code) = (a.code, b.code);
+        // Swap what the two rows show; their check boxes stay in place, keeping the tab order.
+        let (a_code, a_on) = (l.rows[i].code, widgets::checked(l.rows[i].check));
+        let (b_code, b_on) = (l.rows[j].code, widgets::checked(l.rows[j].check));
         l.show(i, b_code, b_on);
         l.show(j, a_code, a_on);
         l.select(Some(j));
@@ -86,30 +90,29 @@ pub fn move_selected(panel: HWND, delta: isize) {
 impl InputList {
     fn push(&mut self, cx: &Ctx, code: u8, on: bool) {
         let id = CHECK_ID + self.rows.len() as i32;
-        let check = widgets::checkbox(cx.panel, &monitors::long_name(code), id, &cx.fonts, Surface::Card);
+        // Just the box: the input's name is painted beside it, so clicking that selects the row.
+        let check = widgets::checkbox(cx.panel, "", id, &cx.fonts, Surface::Card);
         widgets::set_checked(check, on);
         self.rows.push(Row { code, check });
     }
 
     fn show(&mut self, i: usize, code: u8, on: bool) {
-        let r = &mut self.rows[i];
-        r.code = code;
-        ui::set_text(r.check, &monitors::long_name(code));
-        widgets::set_checked(r.check, on);
+        self.rows[i].code = code;
+        widgets::set_checked(self.rows[i].check, on);
     }
 
-    /// Row i, unscrolled.
-    fn row(&self, i: usize) -> RECT {
-        rect(0, i as i32 * self.row_h, self.width, self.row_h)
-    }
-
-    /// The selected row is drawn on the row colour, like a selected list item.
+    /// Selects row `i`: it's highlighted (its check box too).
     fn select(&mut self, i: Option<usize>) {
         for (k, r) in self.rows.iter().enumerate() {
-            theme::set_surface(r.check, if Some(k) == i { Surface::Row } else { Surface::Card }, false);
+            theme::set_surface(r.check, if Some(k) == i { Surface::Selection } else { Surface::Card }, false);
             unsafe { InvalidateRect(r.check, core::ptr::null(), 0) };
         }
         self.selected = i;
+    }
+
+    /// Row `i`, unscrolled.
+    fn row(&self, i: usize) -> RECT {
+        rect(0, i as i32 * self.row_h, self.width, self.row_h)
     }
 }
 
@@ -121,24 +124,41 @@ impl Cards for InputList {
 
     fn place_controls(&mut self, cx: &Ctx, dy: i32) {
         for (i, r) in self.rows.iter().enumerate() {
-            ui::place_rect(r.check, self.row(i).offset(0, -dy).inset(cx.s(PAD_X), cx.s(12)));
+            let row = self.row(i).offset(0, -dy);
+            let top = row.top + (row.height() - cx.s(CHECK)) / 2;
+            ui::place(r.check, row.left + cx.s(PAD_X), top, cx.s(CHECK), cx.s(CHECK));
         }
     }
 
     fn paint(&self, cx: &Ctx, hdc: HDC, dy: i32) {
-        if let Some(i) = self.selected {
-            draw::round_rect(hdc, self.row(i).offset(0, -dy).inset(cx.s(2), cx.s(2)), cx.s(4), theme::color_of(Surface::Row), None);
+        let p = theme::palette();
+        for (i, r) in self.rows.iter().enumerate() {
+            let row = self.row(i).offset(0, -dy);
+            if Some(i) == self.selected {
+                draw::fill(hdc, row, p.selection);
+            }
+            let label = RECT { left: row.left + cx.s(PAD_X + CHECK + LABEL_GAP), right: row.right - cx.s(8), ..row };
+            draw::text(hdc, &monitors::long_name(r.code), label, cx.fonts.normal, p.text, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         }
     }
 
+    /// Tabbing to a row's check box selects the row.
     fn on_command(&mut self, _cx: &Ctx, control: HWND, code: u16) -> bool {
-        if code == BN_CLICKED {
+        if code == BN_SETFOCUS {
             if let Some(i) = self.rows.iter().position(|r| r.check == control) {
                 self.select(Some(i));
-                return true;
             }
         }
         false
+    }
+
+    /// Clicking a row selects it (without ticking it).
+    fn on_click(&mut self, _cx: &Ctx, _x: i32, y: i32) -> bool {
+        let i = (self.row_h > 0).then(|| (y / self.row_h) as usize).filter(|&i| i < self.rows.len());
+        if i.is_some() {
+            self.select(i);
+        }
+        i.is_some()
     }
 
     fn card_of(&self, control: HWND) -> Option<RECT> {

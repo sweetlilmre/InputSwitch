@@ -78,9 +78,10 @@ impl MainWindow {
             return;
         };
         ui::set_text(self.c.activity, &format!("Testing {}…", b.hotkey.display()));
+        let generation = MAIL.generation(); // if this window closes, its results are dropped
         std::thread::spawn(move || {
             let result = monitors::run_binding(&b.inputs, &m);
-            post(Update::Tested { id: b.monitor_id, result });
+            MAIL.post_for(generation, Update::Tested { id: b.monitor_id, result });
         });
     }
 

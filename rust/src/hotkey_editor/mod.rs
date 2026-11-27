@@ -11,9 +11,10 @@ use crate::hotkey::Hotkey;
 use crate::monitors;
 use crate::ui::dialog::{self, Icon};
 use crate::ui::draw::{self, rect};
+use crate::ui::text_box::{self, TextBox};
 use crate::ui::theme::{self, Surface};
 use crate::ui::{self, widgets, Fonts, Slot};
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::rc::Rc;
 
 const CLASS: &str = "InputSwitch.HotkeyEditor";
 const ID_MONITOR: i32 = 200;
@@ -41,7 +42,7 @@ const HEIGHT: i32 = FOOTER_Y + FOOTER_H;
 struct Controls {
     monitor: HWND,
     inputs: HWND,
-    code: HWND,
+    code: TextBox,
     summary: HWND,
 }
 
@@ -56,7 +57,7 @@ struct Frames {
 
 struct Editor {
     hwnd: HWND,
-    fonts: Fonts,
+    fonts: Rc<Fonts>,
     c: Controls,
     frames: Frames,
     monitors: Vec<ProfileMonitor>,
@@ -80,13 +81,12 @@ fn with<R>(f: impl FnOnce(&mut Editor) -> R) -> Option<R> {
 
 /// Shows the editor modally over `owner`. Returns the new or changed hotkey, or None if cancelled.
 pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>) -> Option<Binding> {
-    ui::register_class(CLASS, wndproc, ui::app_icon(), 0);
+    ui::register_class(CLASS, wndproc, true, 0);
 
     let title = if existing.is_some() { "Edit hotkey" } else { "Add hotkey" };
     let hwnd = ui::popup_window(CLASS, title, owner, WIDTH, HEIGHT, dpi);
-    LAST_FOCUS.store(0, Ordering::Relaxed);
-    let fonts = Fonts::new(dpi);
-    let (c, frames) = create_controls(hwnd, &fonts, dpi, existing.map(|b| b.hotkey).unwrap_or_default());
+    let fonts = Rc::new(Fonts::new(dpi));
+    let (c, frames) = create_controls(hwnd, &fonts, existing.map(|b| b.hotkey).unwrap_or_default());
 
     let monitor = existing.and_then(|e| profile.monitors.iter().position(|m| m.monitor_id.eq_ignore_ascii_case(&e.monitor_id))).unwrap_or(0);
     ui::set_text(c.monitor, &profile.monitors.get(monitor).map(monitor_label).unwrap_or_default());
@@ -103,7 +103,8 @@ pub fn run(owner: HWND, dpi: u32, profile: &Profile, existing: Option<&Binding>)
     result
 }
 
-fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, Frames) {
+fn create_controls(h: HWND, f: &Rc<Fonts>, initial: Hotkey) -> (Controls, Frames) {
+    let dpi = f.dpi;
     use Surface::{Card, Layer, Window};
     let s = |v: i32| ui::scale(v, dpi);
     let p = |hw: HWND, x: i32, y: i32, w: i32, ht: i32| ui::place(hw, s(x), s(y), s(w), s(ht));
@@ -131,7 +132,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
     hint("Tick one input to switch to it, two to toggle between them, or more to cycle through them in the order shown.", 220, 2);
     // A card holding the inputs, with the up and down buttons on its right.
     let inputs_frame = r(PAD, INPUTS_Y, CONTENT_W, INPUTS_H);
-    let inputs = input_list::create(h, ID_INPUTS, dpi);
+    let inputs = input_list::create(h, ID_INPUTS, f);
     p(inputs, PAD + 6, INPUTS_Y + 6, CONTENT_W - 12 - 34 - 10, INPUTS_H - 12);
     let arrow = |id, icon| widgets::button(h, "", id, Some(icon), f, Card);
     p(arrow(ID_UP, widgets::ICON_UP), PAD + CONTENT_W - 6 - 34, INPUTS_Y + 10, 34, 32);
@@ -140,8 +141,8 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32, initial: Hotkey) -> (Controls, 
     p(ui::label(h, "Other input code (hex)", f.normal, Window, true), PAD, CODE_Y + 6, 200, 20);
     let add_w = 64;
     let code_frame = r(PAD + CONTENT_W - add_w - 8 - 90, CODE_Y, 90, FIELD_H);
-    let code = ui::edit(h, ID_CODE, f.normal);
-    p(code, PAD + CONTENT_W - add_w - 8 - 90 + 8, CODE_Y + 6, 90 - 16, 20);
+    let code = TextBox::create(h, ID_CODE, f.normal, f);
+    code.place(code_frame, dpi);
     p(widgets::button(h, "Add", ID_ADD_CODE, None, f, Window), PAD + CONTENT_W - add_w, CODE_Y, add_w, FIELD_H);
 
     // What the hotkey will do, on a banner with a keyboard icon.
@@ -187,40 +188,15 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
                 return brush;
             }
         }
-        // Like a dialog: remember which control had focus when the editor is deactivated, and put
-        // it back (initially, the Monitor list) when it's activated again.
+        // Like a dialog: the control that had focus gets it back when the editor is activated
+        // again; at first, the Monitor field (not the key box: it records only once it's clicked).
         WM_ACTIVATE => {
-            if loword(w) == 0 {
-                let f = GetFocus();
-                if f != 0 && IsChild(h, f) != 0 {
-                    LAST_FOCUS.store(f, Ordering::Relaxed);
-                }
-            } else {
-                restore_focus();
-            }
-            return 0;
-        }
-        WM_SETFOCUS => {
-            restore_focus();
+            ui::keep_focus(h, w, with(|e| e.c.monitor).unwrap_or(0));
             return 0;
         }
         _ => {}
     }
     DefWindowProcW(h, m, w, l)
-}
-
-/// The control to focus when the editor becomes active: the last one used, else the Monitor list.
-/// (Not the key box: it records only once the user clicks or tabs into it.)
-static LAST_FOCUS: AtomicIsize = AtomicIsize::new(0);
-
-fn restore_focus() {
-    let target = match LAST_FOCUS.load(Ordering::Relaxed) {
-        0 => with(|e| e.c.monitor).unwrap_or(0),
-        f => f,
-    };
-    if target != 0 {
-        unsafe { SetFocus(target) };
-    }
 }
 
 impl Editor {
@@ -229,9 +205,9 @@ impl Editor {
         let f = &self.frames;
         let s = |v| ui::scale(v, self.dpi);
         draw::fill(hdc, draw::client_rect(self.hwnd), p.window);
-        widgets::text_box(hdc, f.hotkey, self.dpi, key_box::is_listening());
+        text_box::paint_frame(hdc, f.hotkey, self.dpi, key_box::is_listening());
         draw::round_rect(hdc, f.inputs, s(8), p.card, Some(p.stroke));
-        widgets::text_box(hdc, f.code, self.dpi, unsafe { GetFocus() } == self.c.code);
+        self.c.code.paint(hdc, f.code, self.dpi);
         draw::round_rect(hdc, f.summary, s(6), p.card, None);
         let icon = rect(f.summary.left + s(12), f.summary.top, s(20), f.summary.bottom - f.summary.top);
         draw::glyph(hdc, widgets::ICON_KEYBOARD, icon, self.fonts.icon_16, p.accent, DT_VCENTER);
@@ -241,7 +217,7 @@ impl Editor {
 
     fn retheme(&mut self) {
         theme::apply_window(self.hwnd);
-        theme::apply_control(self.c.code, theme::ControlKind::Edit);
+        theme::apply_control(self.c.code.edit, theme::ControlKind::Edit);
         ui::card_panel::retheme(self.c.inputs);
         theme::repaint(self.hwnd);
     }
@@ -285,7 +261,7 @@ impl Editor {
     }
 
     fn add_code(&mut self) {
-        let text = ui::get_text(self.c.code);
+        let text = ui::get_text(self.c.code.edit);
         let t = text.trim();
         let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
         let Some(code) = u8::from_str_radix(t, 16).ok().filter(|&c| c != 0) else {
@@ -293,7 +269,7 @@ impl Editor {
             return;
         };
         input_list::add(self.c.inputs, code);
-        ui::set_text(self.c.code, "");
+        ui::set_text(self.c.code.edit, "");
         self.update_summary();
     }
 
@@ -354,8 +330,16 @@ impl Editor {
             (ID_UP, BN_CLICKED) => input_list::move_selected(self.c.inputs, -1),
             (ID_DOWN, BN_CLICKED) => input_list::move_selected(self.c.inputs, 1),
             (ID_ADD_CODE, BN_CLICKED) => self.add_code(),
-            (ID_CODE, EN_SETFOCUS | EN_KILLFOCUS) => self.repaint(self.frames.code),
-            (IDOK, _) => self.accept(),
+            (ID_CODE, EN_SETFOCUS | EN_KILLFOCUS | EN_CHANGE) => {
+                self.c.code.on_command(code);
+                self.repaint(self.frames.code);
+            }
+            // Enter: presses the focused button, or else saves.
+            (IDOK, _) => {
+                if !ui::click_focused_button(self.hwnd) {
+                    self.accept();
+                }
+            }
             (IDCANCEL, _) => self.result = Some(None),
             _ => return,
         }

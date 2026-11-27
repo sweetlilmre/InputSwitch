@@ -134,12 +134,13 @@ impl MainWindow {
         self.attempted.extend(targets.iter().map(|(id, _)| id.to_lowercase()));
         self.detecting = true;
         ui::set_text(self.c.activity, "Reading monitors over DDC/CI…");
+        let generation = MAIL.generation(); // if this window closes, its results are dropped
         std::thread::spawn(move || {
             for (id, m) in targets {
                 let (inputs, current) = (monitors::supported_inputs(&m), monitors::current_input(&m));
-                post(Update::Detected { id, inputs, current });
+                MAIL.post_for(generation, Update::Detected { id, inputs, current });
             }
-            post(Update::DetectDone);
+            MAIL.post_for(generation, Update::DetectDone);
         });
     }
 

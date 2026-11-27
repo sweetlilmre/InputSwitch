@@ -37,8 +37,8 @@ pub fn action(id: i32, code: u16) -> Option<Action> {
     row(TEST_ID).map(Action::Test).or_else(|| row(EDIT_ID).map(Action::Edit)).or_else(|| row(REMOVE_ID).map(Action::Remove))
 }
 
-pub fn create(parent: HWND, id: i32, dpi: u32) -> HWND {
-    card_panel::create(parent, id, dpi, HotkeyCards { cards: Vec::new() })
+pub fn create(parent: HWND, id: i32, fonts: &std::rc::Rc<crate::ui::Fonts>) -> HWND {
+    card_panel::create(parent, id, fonts, HotkeyCards { cards: Vec::new() })
 }
 
 pub fn set_rows(panel: HWND, rows: Vec<Row>) {

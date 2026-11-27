@@ -24,6 +24,7 @@ pub fn utc_now() -> String {
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds)
 }
 
+pub const APP_NAME: &str = "InputSwitch";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("GIT_COMMIT");
 

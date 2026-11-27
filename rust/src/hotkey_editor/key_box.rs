@@ -97,9 +97,9 @@ pub fn is_raw_key(msg: &MSG) -> bool {
     b != 0 && msg.hwnd == b && !(msg.message == WM_KEYDOWN && is_dialog_key(msg.wParam as u16, current_mods()))
 }
 
-/// The box's background: a text box's (its accent underline shows it's recording).
+/// The box's background: a text box's, darker while it's recording (it has focus then).
 fn background() -> u32 {
-    crate::ui::theme::palette().field
+    crate::ui::text_box::field_color(LISTENING.load(Ordering::Relaxed))
 }
 
 pub fn is_listening() -> bool {

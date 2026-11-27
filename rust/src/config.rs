@@ -29,6 +29,15 @@ pub enum Theme {
 }
 
 impl Theme {
+    /// As the UI toolkit takes it: dark, light, or Windows' setting (None).
+    pub fn dark(self) -> Option<bool> {
+        match self {
+            Theme::System => None,
+            Theme::Light => Some(false),
+            Theme::Dark => Some(true),
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Theme::System => "System",

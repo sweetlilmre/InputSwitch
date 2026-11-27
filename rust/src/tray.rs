@@ -1,41 +1,41 @@
 //! The tray icon and the app's core: watches for display changes, picks the configuration that
 //! fits the connected monitors, and keeps its hotkeys registered.
 //!
-//! State lives in a thread-local RefCell and is only borrowed for short, non-reentrant work;
-//! menus and anything that destroys windows run outside the borrow.
+//! Other windows and background work send it [`Event`]s through its mailbox ([`post`]). Its state
+//! is lent out one message at a time; menus and anything that destroys windows run outside that.
 
 use crate::config::{self, AppConfig};
 use crate::ffi::*;
 use crate::monitors::{self, MonitorInfo};
-use crate::ui::{self, dialog, Slot};
+use crate::ui::{self, dialog, IconSize, Mailbox, Slot, WM_MAIL};
 use crate::{main_window, matcher, sys};
-use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 const CLASS: &str = "InputSwitch.Tray";
+/// The notification area's messages about the icon.
 const WM_TRAY: u32 = WM_APP + 1;
-const WM_POKE: u32 = WM_APP + 2;
 const TIMER_SETTLE: usize = 1;
 /// Docking produces a burst of events as monitors come up one by one; wait for it to settle.
 const SETTLE_MS: u32 = 2500;
 
-/// Results from background work and other windows, delivered on the tray's thread.
+/// What other windows and background work tell the tray.
 pub enum Event {
+    /// A hotkey's or the menu's switch failed (the message says why).
     SwitchFailed(String),
     /// The main window changed something: save it and apply it straight away.
     ConfigChanged(AppConfig),
     /// The hotkey editor opened (true) or closed (false): pause or resume the hotkeys.
     Capturing(bool),
+    /// The main window closed: anything held back while it was open can happen now.
     MainWindowClosed,
 }
 
-static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
-static HWND_TRAY: AtomicIsize = AtomicIsize::new(0);
+static MAIL: Mailbox<Event> = Mailbox::new();
+/// The message Explorer broadcasts when it restarts (the icon must be added again).
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
-pub fn post(ev: Event) {
-    EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(ev);
-    unsafe { PostMessageW(HWND_TRAY.load(Ordering::Relaxed), WM_POKE, 0, 0) };
+pub fn post(event: Event) {
+    MAIL.post(event);
 }
 
 enum MenuAction {
@@ -51,11 +51,10 @@ enum MenuAction {
 
 struct Tray {
     hwnd: HWND,
-    icon: HICON,
     config: AppConfig,
     connected: Vec<MonitorInfo>,
+    /// The configuration that matches the connected monitors.
     active: Option<String>,
-    main_window_open: bool,
     /// The hotkey editor is open: hotkeys are paused meanwhile.
     capturing: bool,
     /// Registration failures last reported, so the same ones aren't reported on every change.
@@ -83,13 +82,12 @@ fn with<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
 }
 
 pub fn run(open_main_window: bool) -> i32 {
-    let icon = ui::app_icon();
-    ui::register_class(CLASS, wndproc, icon, 0);
+    ui::register_class(CLASS, wndproc, false, 0);
     let hwnd = unsafe {
         // A hidden top-level window: message-only windows don't get display/device broadcasts.
-        CreateWindowExW(0, wide(CLASS).as_ptr(), wide(ui::TITLE).as_ptr(), WS_OVERLAPPEDWINDOW, 0, 0, 0, 0, 0, 0, hinstance(), core::ptr::null())
+        CreateWindowExW(0, wide(CLASS).as_ptr(), wide(ui::app_name()).as_ptr(), WS_OVERLAPPEDWINDOW, 0, 0, 0, 0, 0, 0, hinstance(), core::ptr::null())
     };
-    HWND_TRAY.store(hwnd, Ordering::Relaxed);
+    MAIL.open(hwnd);
     TASKBAR_CREATED.store(unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) }, Ordering::Relaxed);
 
     let (config, error) = config::load();
@@ -98,17 +96,17 @@ pub fn run(open_main_window: bool) -> i32 {
             &format!("{e}\n\nInputSwitch will start with fresh settings."));
     }
     let first_run = config.profiles.is_empty();
-    crate::ui::theme::set_choice(config.theme);
+    ui::theme::set_dark(config.theme.dark());
 
     TRAY.with(|t| t.set(Tray {
-        hwnd, icon, config, connected: Vec::new(), active: None, main_window_open: false, capturing: false,
+        hwnd, config, connected: Vec::new(), active: None, capturing: false,
         last_failures: String::new(), on_balloon_click: OnClick::Nothing, hotkeys: Vec::new(),
     }));
     unsafe { WTSRegisterSessionNotification(hwnd, 0) };
     with(|t| {
         t.add_icon();
         t.evaluate(first_run);
-        if open_main_window && !t.main_window_open {
+        if open_main_window && !main_window::is_open() {
             let active = t.active.clone();
             t.open_main_window(active);
         }
@@ -150,7 +148,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
                         t.open_main_window(active)
                     });
                 }
-                x if x as u32 == WM_CONTEXTMENU => show_menu(h),
+                CONTEXT_MENU => show_menu(h, menu_anchor(w)),
                 NIN_BALLOONUSERCLICK => {
                     with(|t| {
                         if let OnClick::Open(target) = std::mem::replace(&mut t.on_balloon_click, OnClick::Nothing) {
@@ -162,14 +160,17 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             }
             return 0;
         }
-        WM_POKE => {
-            // Taken only once the tray is free, so none are lost (they wait for the next poke).
+        WM_MAIL => {
+            // Taken only once the tray is free, so none are lost (they wait for the next wake).
             with(|t| {
-                for ev in std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner())) {
-                    t.on_event(ev);
+                for event in MAIL.take() {
+                    t.on_event(event);
                 }
             });
             return 0;
+        }
+        WM_SETTINGCHANGE if ui::theme::is_theme_change(m, l) => {
+            ui::theme::reload(); // so the next window (and the menu) opens in the new mode
         }
         WM_DESTROY => {
             PostQuitMessage(0);
@@ -189,11 +190,19 @@ fn settle(h: HWND) {
     unsafe { SetTimer(h, TIMER_SETTLE, SETTLE_MS, core::ptr::null()) };
 }
 
-fn show_menu(h: HWND) {
+/// WM_CONTEXTMENU, as the low word of the icon's message (the notification-area version 4 way).
+const CONTEXT_MENU: u16 = WM_CONTEXTMENU as u16;
+
+/// Where to open the menu: the point the notification area gives (the icon, when it's opened
+/// from the keyboard; the mouse otherwise).
+fn menu_anchor(w: WPARAM) -> POINT {
+    POINT { x: loword(w) as i16 as i32, y: hiword(w) as i16 as i32 }
+}
+
+fn show_menu(h: HWND, at: POINT) {
     let Some((menu, actions)) = with(|t| t.build_menu()) else { return };
     let cmd = unsafe {
-        let mut pt = POINT::default();
-        GetCursorPos(&mut pt);
+        let pt = at;
         SetForegroundWindow(h);
         let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, h, core::ptr::null());
         PostMessageW(h, WM_NULL, 0, 0);
@@ -219,7 +228,6 @@ fn exit(h: HWND) {
         t.remove_icon();
         unsafe {
             WTSUnRegisterSessionNotification(t.hwnd);
-            DestroyIcon(t.icon);
         }
     });
     unsafe { DestroyWindow(h) };
@@ -237,7 +245,7 @@ impl Tray {
         let mut index = matcher::find(&self.config, &fp, self.active.as_deref());
 
         let mut created = None;
-        if index.is_none() && !fp.is_empty() && !self.main_window_open {
+        if index.is_none() && !fp.is_empty() && !main_window::is_open() {
             let p = matcher::create_for(&self.connected, &self.config);
             created = Some((p.id.clone(), p.name.clone(), describe(&p)));
             self.config.profiles.push(p);
@@ -246,7 +254,7 @@ impl Tray {
         }
 
         let changed = self.set_active(index);
-        if self.main_window_open && !changed {
+        if main_window::is_open() && !changed {
             main_window::update_connection(self.connected.clone(), self.active.clone()); // new monitors, same setup
         }
         self.register_hotkeys(changed);
@@ -259,7 +267,7 @@ impl Tray {
                 self.notify("New display setup detected",
                     &format!("Created \"{name}\" for {what}. Click to name it and assign hotkeys."), NIIF_INFO, OnClick::Open(Some(id)));
             }
-        } else if changed && !self.main_window_open {
+        } else if changed && !main_window::is_open() {
             if let Some(p) = self.active_profile() {
                 let text = match (p.enabled, self.hotkeys.len()) {
                     (false, _) => "This configuration is disabled. Click to configure.".into(),
@@ -281,7 +289,7 @@ impl Tray {
             return false;
         }
         self.active = new_active;
-        if self.main_window_open {
+        if main_window::is_open() {
             main_window::update_connection(self.connected.clone(), self.active.clone());
         }
         true
@@ -303,7 +311,7 @@ impl Tray {
             Event::SwitchFailed(msg) => self.notify("Input switch failed", &msg, NIIF_WARNING, OnClick::Nothing),
             Event::ConfigChanged(cfg) => {
                 self.config = cfg;
-                crate::ui::theme::set_choice(self.config.theme);
+                ui::theme::set_dark(self.config.theme.dark());
                 self.save();
                 // Configurations may have been added, deleted or changed: keep the same one active
                 // if it still fits.
@@ -317,7 +325,6 @@ impl Tray {
                 self.register_hotkeys(!on);
             }
             Event::MainWindowClosed => {
-                self.main_window_open = false;
                 self.capturing = false;
                 self.evaluate(false); // creates a configuration if the setup is now unknown
             }
@@ -390,13 +397,14 @@ impl Tray {
 
     // -------------------------------------------------------------------------------- settings
 
+    /// Opens the main window on configuration `select` (or the active one), or brings it forward.
     fn open_main_window(&mut self, select: Option<String>) {
-        if self.main_window_open {
+        if main_window::is_open() {
             main_window::select_and_focus(select);
             return;
         }
-        self.main_window_open = true;
-        main_window::open(self.config.clone(), self.connected.clone(), self.active.clone(), select.or(self.active.clone()));
+        let select = select.or_else(|| self.active.clone());
+        main_window::open(self.config.clone(), self.connected.clone(), self.active.clone(), select.as_deref());
     }
 
     // -------------------------------------------------------------------------------- tray icon
@@ -413,7 +421,7 @@ impl Tray {
         let mut d = self.icon_data();
         d.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         d.uCallbackMessage = WM_TRAY;
-        d.hIcon = self.icon;
+        d.hIcon = ui::app_icon(IconSize::Small);
         copy_wide(&mut d.szTip, &self.tip());
         unsafe {
             Shell_NotifyIconW(NIM_ADD, &d);
@@ -541,6 +549,7 @@ impl Tray {
                 if !sys::set_startup(!sys::startup_enabled()) {
                     self.notify("Couldn't change Start with Windows", "The startup setting couldn't be written to the registry.", NIIF_WARNING, OnClick::Nothing);
                 }
+                main_window::startup_changed();
             }
             MenuAction::OpenFolder => {
                 let dir = config::dir();

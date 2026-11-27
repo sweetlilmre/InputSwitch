@@ -1,7 +1,6 @@
 //! The configurations: the list on the left, the name box, the status banner, and creating and
 //! deleting configurations.
 
-use super::layout::StatusIcon;
 use super::*;
 use crate::matcher;
 use crate::monitors::MonitorInfo;
@@ -69,20 +68,20 @@ impl MainWindow {
             ui::enable(h, self.sel.is_some());
         }
         let Some(i) = self.sel else {
-            ui::set_text(self.c.name, "");
+            ui::set_text(self.c.name.edit, "");
             widgets::set_checked(self.c.enabled, false);
             let text = if matcher::fingerprint(&self.connected).is_empty() {
                 "No external monitors are connected. Connect your monitors and a configuration will be created for them automatically."
             } else {
                 "No configurations yet. Choose \"New from current setup\" to create one for the monitors connected now."
             };
-            self.set_status(text, theme::palette().neutral, StatusIcon::Info);
+            self.set_status(text, Severity::Informational);
             self.refresh_monitors();
             self.refresh_hotkeys();
             return;
         };
         let p = &self.config.profiles[i];
-        ui::set_text(self.c.name, &p.name);
+        ui::set_text(self.c.name.edit, &p.name);
         widgets::set_checked(self.c.enabled, p.enabled);
         self.update_status();
         self.refresh_monitors();
@@ -94,28 +93,29 @@ impl MainWindow {
     pub(super) fn update_status(&mut self) {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
-        let colours = theme::palette();
         let present = p.monitors.iter().filter(|m| self.is_connected(&m.monitor_id)).count();
         let monitors = format!("({present} of {} monitors present)", p.monitors.len());
-        let (text, colour, icon) = match (self.is_active(i), p.enabled) {
-            (true, true) => (format!("Connected now {monitors}. Hotkeys are active."), colours.success, StatusIcon::Tick),
-            (true, false) => (format!("Connected now {monitors}. Turn hotkeys on to use them."), colours.caution, StatusIcon::Warning),
-            (false, _) => ("Not connected now. Inputs can only be detected and tested while this setup is connected.".into(), colours.neutral, StatusIcon::Info),
+        let (text, severity) = match (self.is_active(i), p.enabled) {
+            (true, true) => (format!("Connected now {monitors}. Hotkeys are active."), Severity::Success),
+            (true, false) => (format!("Connected now {monitors}. Turn hotkeys on to use them."), Severity::Warning),
+            (false, _) => ("Not connected now. Inputs can only be detected and tested while this setup is connected.".into(), Severity::Informational),
         };
-        self.set_status(&text, colour, icon);
+        self.set_status(&text, severity);
     }
 
-    fn set_status(&mut self, text: &str, colour: u32, icon: StatusIcon) {
+    /// Sets the status banner's message and tint (the label and checkbox on it take the tint too).
+    fn set_status(&mut self, text: &str, severity: Severity) {
         ui::set_text(self.c.status, text);
-        self.status_icon = icon;
-        theme::set_banner(colour);
+        self.status = severity;
+        theme::set_surface(self.c.status, theme::Surface::InfoBar(severity), false);
+        theme::set_surface(self.c.enabled, theme::Surface::InfoBar(severity), false);
         let r = self.regions.banner;
         unsafe { RedrawWindow(self.hwnd, &r, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
     }
 
     pub(super) fn rename_profile(&mut self) {
         let Some(i) = self.sel else { return };
-        self.config.profiles[i].name = ui::get_text(self.c.name);
+        self.config.profiles[i].name = ui::get_text(self.c.name.edit);
         self.refresh_profile_label();
         self.commit_soon();
     }
@@ -147,8 +147,8 @@ impl MainWindow {
         self.commit();
         self.refresh_profiles(Some(&id));
         unsafe {
-            SetFocus(self.c.name); // ready to name it
-            SendMessageW(self.c.name, EM_SETSEL, 0, -1);
+            SetFocus(self.c.name.edit); // ready to name it
+            SendMessageW(self.c.name.edit, EM_SETSEL, 0, -1);
         }
     }
 

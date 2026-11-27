@@ -7,7 +7,7 @@ use super::theme::{self, Surface};
 use super::{widgets, Fonts, Slot};
 use crate::ffi::*;
 
-const CLASS: &str = "InputSwitch.Dialog";
+const CLASS: &str = "ui.Dialog";
 const FIRST_BUTTON_ID: i32 = 300;
 
 // Layout at 96 DPI. The height follows the text.
@@ -63,7 +63,7 @@ pub fn show(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
     if STATE.with(|s| s.occupied()) {
         return show_system(owner, icon, heading, message, buttons); // one at a time (a dialog over a dialog)
     }
-    super::register_class(CLASS, wndproc, super::app_icon(), 0);
+    super::register_class(CLASS, wndproc, true, 0);
 
     let dpi = unsafe { if owner != 0 { GetDpiForWindow(owner) } else { GetDpiForSystem() } }.max(96);
     let fonts = Fonts::new(dpi);
@@ -73,7 +73,7 @@ pub fn show(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
         + if message.is_empty() { 0 } else { s(8) + draw::text_height(message, fonts.normal, text_w) };
     let body_h = text_h.max(s(BADGE + 2)) * 96 / dpi as i32;
     let height = TOP + body_h + 24 + FOOTER;
-    let hwnd = super::popup_window(CLASS, super::TITLE, owner, WIDTH, height, dpi);
+    let hwnd = super::popup_window(CLASS, super::app_name(), owner, WIDTH, height, dpi);
 
     // Equal-width buttons across the footer, the main action first.
     let n = buttons.len().max(1) as i32;
@@ -105,7 +105,7 @@ fn show_system(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &
     let flags = if buttons.len() > 1 { TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON } else { TDCBF_OK_BUTTON };
     let mut pressed = 0;
     unsafe {
-        TaskDialog(owner, hinstance(), wide(super::TITLE).as_ptr(), wide(heading).as_ptr(), wide(message).as_ptr(), flags, icon, &mut pressed);
+        TaskDialog(owner, hinstance(), wide(super::app_name()).as_ptr(), wide(heading).as_ptr(), wide(message).as_ptr(), flags, icon, &mut pressed);
     }
     if pressed == IDOK { 0 } else { buttons.len().saturating_sub(1) }
 }

@@ -5,6 +5,8 @@ use super::scale;
 use crate::ffi::*;
 
 pub struct Fonts {
+    /// The DPI these fonts are for.
+    pub dpi: u32,
     /// Body text and controls (14).
     pub normal: HFONT,
     /// Field labels and emphasis (14 semibold).
@@ -19,8 +21,9 @@ pub struct Fonts {
     pub heading: HFONT,
     /// The configuration name box (24 semibold).
     pub title: HFONT,
-    /// Segoe Fluent Icons glyphs: in buttons (14), the status banner (16), the configurations
-    /// list (18), message badges (20) and monitor cards (28).
+    /// Segoe Fluent Icons glyphs: a text box's clear button (12), buttons (14), the status
+    /// banner (16), the configurations list (18), message badges (20) and monitor cards (28).
+    pub icon_12: HFONT,
     pub icon: HFONT,
     pub icon_16: HFONT,
     pub icon_18: HFONT,
@@ -29,11 +32,13 @@ pub struct Fonts {
 }
 
 impl Fonts {
+    /// Every font, for windows at `dpi`.
     pub fn new(dpi: u32) -> Fonts {
         let text = |px, weight| font("Segoe UI", dpi, px, weight);
         let icons = icon_face();
         let icon = |px| font(icons, dpi, px, 400);
         Fonts {
+            dpi,
             normal: text(14, 400),
             bold: text(14, 600),
             small: text(12, 400),
@@ -41,6 +46,7 @@ impl Fonts {
             section: text(16, 600),
             heading: text(20, 600),
             title: text(24, 600),
+            icon_12: icon(12),
             icon: icon(14),
             icon_16: icon(16),
             icon_18: icon(18),
@@ -53,13 +59,14 @@ impl Fonts {
 impl Drop for Fonts {
     fn drop(&mut self) {
         let all = [self.normal, self.bold, self.small, self.key_cap, self.section, self.heading, self.title,
-            self.icon, self.icon_16, self.icon_18, self.icon_20, self.icon_28];
+            self.icon_12, self.icon, self.icon_16, self.icon_18, self.icon_20, self.icon_28];
         for f in all {
             unsafe { DeleteObject(f) };
         }
     }
 }
 
+/// A font `px` pixels high at 96 DPI.
 fn font(face: &str, dpi: u32, px: i32, weight: i32) -> HFONT {
     const DEFAULT_CHARSET: u32 = 1;
     const CLEARTYPE_QUALITY: u32 = 5;

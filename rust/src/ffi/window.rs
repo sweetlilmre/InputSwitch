@@ -102,13 +102,18 @@ pub const WS_EX_CONTROLPARENT: u32 = 0x0001_0000;
 pub const WS_EX_TOPMOST: u32 = 0x0000_0008;
 pub const WS_EX_APPWINDOW: u32 = 0x0004_0000;
 pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
+pub const SW_HIDE: i32 = 0;
+pub const SW_SHOWNOACTIVATE: i32 = 4;
 pub const SW_SHOW: i32 = 5;
 pub const SW_RESTORE: i32 = 9;
+pub const SWP_NOMOVE: u32 = 0x0002;
 pub const SWP_NOZORDER: u32 = 0x0004;
 pub const SWP_NOACTIVATE: u32 = 0x0010;
 pub const COLOR_BTNFACE: isize = 15;
 pub const IDC_ARROW: usize = 32512;
 pub const SM_CXSMICON: i32 = 49;
+pub const SM_CXICON: i32 = 11;
+pub const WA_INACTIVE: u16 = 0;
 pub const WM_ACTIVATE: u32 = 0x0006;
 pub const WM_SETFOCUS: u32 = 0x0007;
 pub const WM_KILLFOCUS: u32 = 0x0008;
@@ -130,6 +135,9 @@ pub const WM_CTLCOLOREDIT: u32 = 0x0133;
 pub const WM_CTLCOLORLISTBOX: u32 = 0x0134;
 pub const WM_CTLCOLORBTN: u32 = 0x0135;
 pub const WM_SHOWWINDOW: u32 = 0x0018;
+pub const WM_MOUSEACTIVATE: u32 = 0x0021;
+pub const MA_NOACTIVATE: LRESULT = 3;
+pub const WM_GETFONT: u32 = 0x0031;
 pub const WM_ACTIVATEAPP: u32 = 0x001C;
 pub const WM_MOUSEMOVE: u32 = 0x0200;
 pub const WM_LBUTTONDOWN: u32 = 0x0201;
@@ -160,6 +168,7 @@ pub const SM_CYSCREEN: i32 = 1;
 pub const SIF_RANGE: u32 = 0x1;
 pub const SIF_PAGE: u32 = 0x2;
 pub const SIF_POS: u32 = 0x4;
+pub const SIF_TRACKPOS: u32 = 0x10;
 
 #[link(name = "user32")]
 extern "system" {
@@ -196,13 +205,11 @@ extern "system" {
     pub fn TrackPopupMenu(m: HMENU, flags: u32, x: i32, y: i32, reserved: i32, h: HWND, r: *const RECT) -> BOOL;
     pub fn DestroyMenu(m: HMENU) -> BOOL;
     pub fn SetMenuDefaultItem(m: HMENU, item: u32, by_pos: u32) -> BOOL;
-    pub fn GetCursorPos(p: *mut POINT) -> BOOL;
     pub fn RegisterWindowMessageW(s: *const u16) -> u32;
     pub fn GetDpiForWindow(h: HWND) -> u32;
     pub fn GetDpiForSystem() -> u32;
     pub fn AdjustWindowRectExForDpi(r: *mut RECT, style: u32, menu: BOOL, ex: u32, dpi: u32) -> BOOL;
     pub fn LoadImageW(inst: HINSTANCE, name: *const u16, kind: u32, cx: i32, cy: i32, flags: u32) -> isize;
-    pub fn DestroyIcon(h: HICON) -> BOOL;
     pub fn GetSystemMetrics(i: i32) -> i32;
     pub fn GetFocus() -> HWND;
     pub fn GetForegroundWindow() -> HWND;
@@ -210,8 +217,11 @@ extern "system" {
     pub fn IsChild(parent: HWND, h: HWND) -> BOOL;
     pub fn TrackMouseEvent(t: *mut TRACKMOUSEEVENT) -> BOOL;
     pub fn MessageBeep(kind: u32) -> BOOL;
+    pub fn GetScrollInfo(h: HWND, bar: i32, si: *mut SCROLLINFO) -> BOOL;
     pub fn SetScrollInfo(h: HWND, bar: i32, si: *const SCROLLINFO, redraw: BOOL) -> i32;
     pub fn GetParent(h: HWND) -> HWND;
     pub fn SetCapture(h: HWND) -> HWND;
+    pub fn IsWindow(h: HWND) -> BOOL;
+    pub fn GetClassNameW(h: HWND, name: *mut u16, len: i32) -> i32;
     pub fn ReleaseCapture() -> BOOL;
 }

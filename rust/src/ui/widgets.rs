@@ -24,6 +24,7 @@ pub const ICON_TICK: char = '\u{E73E}';
 pub const ICON_WARNING: char = '\u{E7BA}';
 pub const ICON_INFO: char = '\u{E946}';
 pub const ICON_KEYBOARD: char = '\u{E765}';
+pub const ICON_CLEAR: char = '\u{E711}';
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -51,7 +52,7 @@ thread_local! {
 }
 
 fn create(parent: HWND, text: &str, id: i32, kind: Kind, icon: Option<char>, fonts: &Fonts, surface: Surface) -> HWND {
-    let h = super::child(parent, "BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, 0, id, fonts.normal);
+    let h = super::child(parent, "BUTTON", text, BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 0, id, fonts.normal);
     theme::set_surface(h, surface, false);
     INFO.with(|i| i.borrow_mut().insert(h, Info { kind, icon, checked: false, hot: false, text_font: fonts.normal, icon_font: fonts.icon }));
     unsafe { SetWindowSubclass(h, proc_, 1, 0) };
@@ -77,18 +78,6 @@ pub fn checkbox(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surfa
 
 pub fn switch(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface) -> HWND {
     create(parent, text, id, Kind::Switch, None, fonts, surface)
-}
-
-/// Paints the frame behind a borderless edit box, as a Fluent text box: a faint border and a
-/// brighter bottom line, which turns accent-coloured and thicker while the box has focus. The edit
-/// box itself sits inside, with the field colour (see [`theme::ctl_color`]).
-pub fn text_box(hdc: HDC, frame: RECT, dpi: u32, focused: bool) {
-    let p = theme::palette();
-    let s = |v| super::scale(v, dpi);
-    draw::round_rect(hdc, frame, s(4), p.field, Some(p.field_stroke));
-    let line = if focused { s(2) } else { 1 };
-    let underline = RECT { left: frame.left + s(3), top: frame.bottom - line, right: frame.right - s(3), bottom: frame.bottom };
-    draw::fill(hdc, underline, if focused { p.accent } else { p.field_underline });
 }
 
 /// Updates the fonts after a DPI change.
@@ -200,7 +189,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
                 right: (track.right + s(2)).min(r.right - 1),
                 bottom: (track.bottom + s(2)).min(r.bottom - 1),
             };
-            draw::round_rect(hdc, ring, (ring.bottom - ring.top) / 2, draw::NO_FILL, Some(p.text));
+            draw::outline(hdc, ring, (ring.bottom - ring.top) / 2, p.text);
         }
         return true;
     }
@@ -220,7 +209,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
         let label = RECT { left: bx.right + s(8), top: r.top, right: r.right, bottom: r.bottom };
         draw::text(hdc, &text, label, font, if disabled { p.text_disabled } else { p.text }, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         if focused {
-            draw::round_rect(hdc, RECT { left: bx.left - s(1), top: bx.top - s(1), right: bx.right + s(1), bottom: bx.bottom + s(1) }, s(5), draw::NO_FILL, Some(p.text));
+            draw::outline(hdc, RECT { left: bx.left - s(1), top: bx.top - s(1), right: bx.right + s(1), bottom: bx.bottom + s(1) }, s(5), p.text);
         }
         return true;
     }
@@ -258,7 +247,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
 
     if focused {
         let f = RECT { left: r.left + s(2), top: r.top + s(2), right: r.right - s(2), bottom: r.bottom - s(2) };
-        draw::round_rect(hdc, f, s(3), draw::NO_FILL, Some(fg));
+        draw::outline(hdc, f, s(3), fg);
     }
     true
 }

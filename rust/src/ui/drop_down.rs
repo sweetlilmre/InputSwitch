@@ -7,7 +7,7 @@ use super::theme::{self, Surface};
 use super::{widgets, Fonts, Slot};
 use crate::ffi::*;
 
-const CLASS: &str = "InputSwitch.DropDownList";
+const CLASS: &str = "ui.DropDownList";
 
 // At 96 DPI, measured from the C# app's (WPF Fluent) drop-down.
 const GAP: i32 = 2;
@@ -48,7 +48,7 @@ pub fn choose(field: HWND, choices: &[String], current: Option<usize>) -> Option
     if choices.is_empty() || STATE.with(|s| s.occupied()) {
         return None;
     }
-    super::register_class(CLASS, wndproc, 0, CS_DROPSHADOW);
+    super::register_class(CLASS, wndproc, false, CS_DROPSHADOW);
     let dpi = unsafe { GetDpiForWindow(field) }.max(96);
     let s = |v| super::scale(v, dpi);
     let mut r = RECT::default();

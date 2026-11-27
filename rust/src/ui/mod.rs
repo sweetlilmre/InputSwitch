@@ -8,20 +8,37 @@ pub mod draw;
 pub mod drop_down;
 pub mod fonts;
 pub mod lists;
+pub mod mailbox;
+pub mod text_box;
 pub mod theme;
 pub mod widgets;
 
 pub use fonts::Fonts;
+pub use mailbox::{Mailbox, WM_MAIL};
 
 use crate::ffi::*;
 use core::ptr::null;
 use std::cell::RefCell;
 
-pub const TITLE: &str = "InputSwitch";
+/// The app's name, for title bars. Set once at start-up with [`set_app_name`].
+static APP_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+pub fn set_app_name(name: &'static str) {
+    let _ = APP_NAME.set(name);
+}
+
+pub fn app_name() -> &'static str {
+    APP_NAME.get().copied().unwrap_or("")
+}
 
 /// A length at 96 DPI scaled to `dpi`.
 pub fn scale(v: i32, dpi: u32) -> i32 {
     (v as i64 * dpi as i64 / 96) as i32
+}
+
+/// A window's DPI (96 if Windows doesn't say).
+pub fn dpi_of(h: HWND) -> u32 {
+    unsafe { GetDpiForWindow(h) }.max(96)
 }
 
 // ------------------------------------------------------------------------------------------ window state
@@ -61,8 +78,9 @@ impl<T> Slot<T> {
 
 // ------------------------------------------------------------------------------------------ windows
 
-/// Registers window class `name` the first time it's asked for (later calls do nothing).
-pub fn register_class(name: &'static str, proc: WNDPROC, icon: HICON, style: u32) {
+/// Registers window class `name` the first time it's asked for (later calls do nothing), with
+/// the app icon if `icon`.
+pub fn register_class(name: &'static str, proc: WNDPROC, icon: bool, style: u32) {
     thread_local! {
         static REGISTERED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     }
@@ -78,12 +96,12 @@ pub fn register_class(name: &'static str, proc: WNDPROC, icon: HICON, style: u32
         cbClsExtra: 0,
         cbWndExtra: 0,
         hInstance: hinstance(),
-        hIcon: icon,
+        hIcon: if icon { app_icon(IconSize::Large) } else { 0 },
         hCursor: unsafe { LoadCursorW(0, IDC_ARROW as *const u16) },
         hbrBackground: COLOR_BTNFACE + 1,
         lpszMenuName: null(),
         lpszClassName: class.as_ptr(),
-        hIconSm: icon,
+        hIconSm: if icon { app_icon(IconSize::Small) } else { 0 },
     };
     unsafe { RegisterClassExW(&wc) };
 }
@@ -148,13 +166,66 @@ pub fn modal_loop(owner: HWND, dialog: HWND, done: &dyn Fn() -> bool, raw_key: &
     }
 }
 
-/// The app icon: resource 1, written into the exe by build.rs from `assets/InputSwitch.ico` (the C#
-/// app's artwork). Loaded at the small-icon (tray) size; Windows picks the best frame.
-pub fn app_icon() -> HICON {
-    let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
+#[derive(Clone, Copy)]
+pub enum IconSize {
+    /// Title bars and the notification area.
+    Small,
+    /// Alt-Tab and the taskbar.
+    Large,
+}
+
+/// The app icon (resource 1 in the exe, written by build.rs), at a standard size. Shared: don't
+/// destroy it.
+pub fn app_icon(size: IconSize) -> HICON {
     const IMAGE_ICON: u32 = 1;
+    const LR_SHARED: u32 = 0x8000;
+    let metric = match size { IconSize::Small => SM_CXSMICON, IconSize::Large => SM_CXICON };
+    let px = unsafe { GetSystemMetrics(metric) };
     let resource_id_1 = core::ptr::without_provenance::<u16>(1); // MAKEINTRESOURCE(1)
-    unsafe { LoadImageW(hinstance(), resource_id_1, IMAGE_ICON, size, size, 0) }
+    unsafe { LoadImageW(hinstance(), resource_id_1, IMAGE_ICON, px, px, LR_SHARED) }
+}
+
+// ------------------------------------------------------------------------------------------ keyboard
+
+thread_local! {
+    /// The control that last had focus in each window.
+    static FOCUS: RefCell<std::collections::HashMap<HWND, HWND>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// Call on WM_ACTIVATE: remembers the focused control when `window` is deactivated and puts it
+/// back when it's activated again (as a dialog does), else focuses `default` (or the window).
+pub fn keep_focus(window: HWND, w: WPARAM, default: HWND) {
+    unsafe {
+        if loword(w) == WA_INACTIVE {
+            let focus = GetFocus();
+            if focus != 0 && IsChild(window, focus) != 0 {
+                FOCUS.with(|f| f.borrow_mut().insert(window, focus));
+            }
+            return;
+        }
+        let remembered = FOCUS.with(|f| f.borrow().get(&window).copied()).filter(|&c| IsWindow(c) != 0 && IsChild(window, c) != 0);
+        let target = remembered.unwrap_or(if default != 0 { default } else { window });
+        SetFocus(target);
+    }
+}
+
+/// What Enter does in a window: presses the focused button, if a button has focus. Returns
+/// true if it did.
+pub fn click_focused_button(window: HWND) -> bool {
+    unsafe {
+        let focus = GetFocus();
+        if focus == 0 || IsChild(window, focus) == 0 || class_name(focus) != "Button" {
+            return false;
+        }
+        SendMessageW(focus, BM_CLICK, 0, 0);
+        true
+    }
+}
+
+fn class_name(h: HWND) -> String {
+    let mut buf = [0u16; 64];
+    unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) };
+    from_wide(&buf)
 }
 
 // ------------------------------------------------------------------------------------------ controls

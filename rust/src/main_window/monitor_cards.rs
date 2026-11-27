@@ -6,6 +6,7 @@ use crate::ffi::*;
 use crate::ui::card_panel::{self, Cards, Ctx};
 use crate::ui::draw::{self, rect, RectExt};
 use crate::ui::theme::{self, Surface};
+use crate::ui::text_box::TextBox;
 use crate::ui::{self, widgets};
 
 /// What one card shows.
@@ -47,8 +48,8 @@ pub fn action(id: i32, code: u16) -> Option<Action> {
     }
 }
 
-pub fn create(parent: HWND, id: i32, dpi: u32) -> HWND {
-    card_panel::create(parent, id, dpi, MonitorCards { cards: Vec::new() })
+pub fn create(parent: HWND, id: i32, fonts: &std::rc::Rc<crate::ui::Fonts>) -> HWND {
+    card_panel::create(parent, id, fonts, MonitorCards { cards: Vec::new() })
 }
 
 /// Shows these monitors. Cards for the same monitors (in the same order) are updated in place,
@@ -59,11 +60,11 @@ pub fn set_rows(panel: HWND, rows: Vec<Row>) {
 
 /// What's typed in a monitor's name box.
 pub fn name_text(panel: HWND, row: usize) -> Option<String> {
-    card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| ui::get_text(c.name))).flatten()
+    card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| ui::get_text(c.name.edit))).flatten()
 }
 
 pub fn set_name_text(panel: HWND, row: usize, text: &str) {
-    if let Some(h) = card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| c.name)).flatten() {
+    if let Some(h) = card_panel::with(panel, |m: &mut MonitorCards, _| m.cards.get(row).map(|c| c.name.edit)).flatten() {
         ui::set_text(h, text);
     }
 }
@@ -85,7 +86,7 @@ const BUTTON_W: i32 = 34;
 
 struct Card {
     row: Row,
-    name: HWND,
+    name: TextBox,
     remove: HWND,
     // Laid out unscrolled, in panel pixels.
     rect: RECT,
@@ -109,8 +110,8 @@ impl MonitorCards {
         if same_monitors {
             let focus = unsafe { GetFocus() };
             for (c, r) in self.cards.iter_mut().zip(rows) {
-                if c.name != focus && ui::get_text(c.name) != r.name {
-                    ui::set_text(c.name, &r.name);
+                if c.name.edit != focus && ui::get_text(c.name.edit) != r.name {
+                    ui::set_text(c.name.edit, &r.name);
                 }
                 c.row = r;
             }
@@ -118,14 +119,14 @@ impl MonitorCards {
         }
         for c in self.cards.drain(..) {
             unsafe {
-                DestroyWindow(c.name);
+                c.name.destroy();
                 DestroyWindow(c.remove);
             }
         }
         for (i, row) in rows.into_iter().take(MAX_ROWS).enumerate() {
             let i = i as i32;
-            let name = ui::edit(cx.panel, NAME_ID + i, cx.fonts.bold);
-            ui::set_text(name, &row.name);
+            let name = TextBox::create(cx.panel, NAME_ID + i, cx.fonts.bold, &cx.fonts);
+            ui::set_text(name.edit, &row.name);
             let remove = widgets::button(cx.panel, "", REMOVE_ID + i, Some(widgets::ICON_DELETE), &cx.fonts, Surface::Row);
             self.cards.push(Card { row, name, remove, rect: RECT::default(), name_frame: RECT::default(), chips: Vec::new(), pill: RECT::default() });
         }
@@ -148,7 +149,7 @@ impl Cards for MonitorCards {
             // the chips, wrapping like a WrapPanel.
             let left = s(PAD_X + ICON + ICON_GAP);
             let right = pill_x - s(12);
-            let typed = draw::text_width(&ui::get_text(c.name), cx.fonts.bold) + s(24);
+            let typed = draw::text_width(&ui::get_text(c.name.edit), cx.fonts.bold) + s(24 + 32); // the text, and the clear button
             let name_w = typed.clamp(s(NAME_MIN_W), s(NAME_MAX_W)).min((right - left).max(s(80)));
             c.name_frame = rect(left, top, name_w, s(NAME_H));
             let mut bottom = c.name_frame.bottom + s(4 + LINE_H);
@@ -176,7 +177,7 @@ impl Cards for MonitorCards {
     fn place_controls(&mut self, cx: &Ctx, dy: i32) {
         for c in &self.cards {
             let f = c.name_frame.offset(0, -dy);
-            ui::place(c.name, f.left + cx.s(8), f.top + (f.height() - cx.s(20)) / 2, f.width() - cx.s(16), cx.s(20));
+            c.name.place(f, cx.dpi);
             ui::place(c.remove, c.rect.right - cx.s(PAD_X + BUTTON_W), f.top, cx.s(BUTTON_W), cx.s(NAME_H));
         }
     }
@@ -184,7 +185,6 @@ impl Cards for MonitorCards {
     fn paint(&self, cx: &Ctx, hdc: HDC, dy: i32) {
         let p = theme::palette();
         let s = |v| cx.s(v);
-        let focus = unsafe { GetFocus() };
         for c in &self.cards {
             let up = |r: RECT| r.offset(0, -dy);
             // A monitor that isn't connected is dimmed, like the C# card's 70% opacity.
@@ -196,7 +196,7 @@ impl Cards for MonitorCards {
             let icon = rect(card.left + s(PAD_X), name.top, s(ICON), s(ICON + 4));
             draw::glyph(hdc, widgets::ICON_MONITOR, icon, cx.fonts.icon_28, dim(p.text), 0);
 
-            widgets::text_box(hdc, name, cx.dpi, c.name == focus);
+            c.name.paint(hdc, name, cx.dpi);
 
             let pill = up(c.pill);
             let details = RECT { left: name.left + s(2), top: name.bottom + s(4), right: pill.left - s(12), bottom: name.bottom + s(4 + LINE_H) };
@@ -222,25 +222,28 @@ impl Cards for MonitorCards {
         }
     }
 
-    /// Typing changes how wide the name box is.
-    fn on_command(&mut self, _cx: &Ctx, _control: HWND, code: u16) -> bool {
+    /// The name boxes show their clear buttons; typing changes how wide a name box is.
+    fn on_command(&mut self, _cx: &Ctx, control: HWND, code: u16) -> bool {
+        if let Some(c) = self.cards.iter().find(|c| c.name.edit == control) {
+            c.name.on_command(code);
+        }
         code == EN_CHANGE
     }
 
     fn card_of(&self, control: HWND) -> Option<RECT> {
-        self.cards.iter().find(|c| c.name == control || c.remove == control).map(|c| c.rect)
+        self.cards.iter().find(|c| c.name.edit == control || c.remove == control).map(|c| c.rect)
     }
 
     fn fonts_changed(&mut self, cx: &Ctx) {
         for c in &self.cards {
-            ui::set_font(c.name, cx.fonts.bold);
+            c.name.set_font(cx.fonts.bold, &cx.fonts);
             widgets::set_fonts(c.remove, &cx.fonts);
         }
     }
 
     fn retheme(&mut self, _cx: &Ctx) {
         for c in &self.cards {
-            theme::apply_control(c.name, theme::ControlKind::Edit);
+            theme::apply_control(c.name.edit, theme::ControlKind::Edit);
         }
     }
 }

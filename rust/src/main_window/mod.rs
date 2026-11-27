@@ -7,9 +7,9 @@
 //! - [`profiles`], [`monitors`], [`hotkeys`]: what each part of the window does
 //! - [`monitor_cards`], [`hotkey_cards`]: how the two lists of cards look
 //!
-//! Anything from outside the window's own messages (other windows, background work) arrives
-//! through [`post`] and is applied when the window is free, so nothing is lost while a dialog
-//! is open.
+//! Anything from outside the window's own messages (the tray, background work, theme and DPI
+//! changes) arrives in its [`Mailbox`] and is applied when the window is free, so nothing is lost
+//! while a dialog is open.
 
 mod hotkey_cards;
 mod hotkeys;
@@ -21,15 +21,15 @@ mod profiles;
 use crate::config::{AppConfig, Theme};
 use crate::ffi::*;
 use crate::monitors::MonitorInfo;
-use crate::ui::{self, theme, widgets, Fonts, Slot};
+use crate::ui::{self, theme, widgets, Fonts, Mailbox, Slot, WM_MAIL};
 use crate::{sys, tray};
-use layout::{Controls, Regions, StatusIcon};
+use layout::{Controls, Regions};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::Mutex;
+use theme::Severity;
 
 const CLASS: &str = "InputSwitch.MainWindow";
-const WM_UPDATE: u32 = WM_APP + 2;
 /// Commits typed names once typing pauses, rather than on every keystroke.
 const TIMER_TYPING: usize = 1;
 const TYPING_MS: u32 = 700;
@@ -40,43 +40,29 @@ enum Update {
     Connection { connected: Vec<MonitorInfo>, active: Option<String> },
     /// Show this configuration (from a tray click or a notification).
     Select(Option<String>),
+    /// "Start with Windows" was changed from the tray menu.
+    Startup,
+    /// Windows switched between light and dark (or the accent colour changed).
+    Theme,
+    /// The window moved to a monitor with another DPI.
+    Dpi { dpi: u32, suggested: RECT },
     /// Background work: a monitor's inputs were read, all of them were, or a test switched one.
     Detected { id: String, inputs: Vec<u8>, current: Option<u8> },
     DetectDone,
     Tested { id: String, result: Result<u8, String> },
 }
 
-static UPDATES: Mutex<Vec<Update>> = Mutex::new(Vec::new());
+static MAIL: Mailbox<Update> = Mailbox::new();
 static HWND_MAIN: AtomicIsize = AtomicIsize::new(0);
-
-fn post(update: Update) {
-    UPDATES.lock().unwrap_or_else(|e| e.into_inner()).push(update);
-    poke();
-}
-
-/// Asks the window to apply the queued updates.
-fn poke() {
-    let h = hwnd();
-    if h != 0 {
-        unsafe { PostMessageW(h, WM_UPDATE, 0, 0) };
-    }
-}
-
-fn take_updates() -> Vec<Update> {
-    std::mem::take(&mut *UPDATES.lock().unwrap_or_else(|e| e.into_inner()))
-}
-
-fn updates_waiting() -> bool {
-    !UPDATES.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
-}
 
 struct MainWindow {
     hwnd: HWND,
     dpi: u32,
-    fonts: Fonts,
+    fonts: Rc<Fonts>,
     c: Controls,
     regions: Regions,
-    status_icon: StatusIcon,
+    /// How the status banner is tinted.
+    status: Severity,
     config: AppConfig,
     connected: Vec<MonitorInfo>,
     /// The configuration matching the connected monitors.
@@ -104,27 +90,35 @@ fn with<R>(f: impl FnOnce(&mut MainWindow) -> R) -> Option<R> {
 
 // ------------------------------------------------------------------------------------------ public
 
+/// The window, or 0 if it isn't open.
 pub fn hwnd() -> HWND {
     HWND_MAIN.load(Ordering::Relaxed)
 }
 
-pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<String>, select: Option<String>) {
-    ui::register_class(CLASS, wndproc, ui::app_icon(), 0);
+pub fn is_open() -> bool {
+    hwnd() != 0
+}
 
+/// Opens the window on `config`, showing configuration `select`. `connected` and `active` are
+/// the monitors connected now and the configuration that matches them.
+pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<String>, select: Option<&str>) {
+    ui::register_class(CLASS, wndproc, true, 0);
     let hwnd = layout::create_window(CLASS);
     HWND_MAIN.store(hwnd, Ordering::Relaxed);
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let fonts = Fonts::new(dpi);
-    let c = layout::create_controls(hwnd, &fonts, dpi);
+    MAIL.open(hwnd);
+    let dpi = ui::dpi_of(hwnd);
+    let fonts = Rc::new(Fonts::new(dpi));
+    layout::set_list_fonts(&fonts);
+    let c = layout::create_controls(hwnd, &fonts);
     STATE.with(|s| s.set(MainWindow {
-        hwnd, dpi, fonts, c, regions: Regions::default(), status_icon: StatusIcon::Info, config, connected, active, sel: None,
+        hwnd, dpi, fonts, c, regions: Regions::default(), status: Severity::Informational, config, connected, active, sel: None,
         current: HashMap::new(), attempted: HashSet::new(), detecting: false, detect_queued: None, typing: false,
     }));
     with(|w| {
         widgets::set_checked(w.c.startup, sys::startup_enabled());
         widgets::set_checked(w.c.notify, w.config.show_notifications);
         widgets::set_checked(w.c.dark, theme::palette().dark);
-        w.refresh_profiles(select.as_deref());
+        w.refresh_profiles(select);
         w.layout();
     });
     unsafe {
@@ -133,19 +127,25 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     }
 }
 
+/// The connected monitors (or the configuration that matches them) changed.
 pub fn update_connection(connected: Vec<MonitorInfo>, active: Option<String>) {
-    post(Update::Connection { connected, active });
+    MAIL.post(Update::Connection { connected, active });
+}
+
+/// "Start with Windows" was changed elsewhere (the tray menu).
+pub fn startup_changed() {
+    MAIL.post(Update::Startup);
 }
 
 /// Brings the window forward (or the hotkey editor, if it's open) and shows configuration `id`.
 pub fn select_and_focus(id: Option<String>) {
     if id.is_some() {
-        post(Update::Select(id));
+        MAIL.post(Update::Select(id));
     }
-    let main = hwnd();
-    if main == 0 {
+    if !is_open() {
         return;
     }
+    let main = hwnd();
     unsafe {
         if IsIconic(main) != 0 {
             ShowWindow(main, SW_RESTORE);
@@ -157,9 +157,8 @@ pub fn select_and_focus(id: Option<String>) {
 
 /// Closes the window without asking (the app is exiting).
 pub fn destroy() {
-    let h = hwnd();
-    if h != 0 {
-        unsafe { DestroyWindow(h) };
+    if is_open() {
+        unsafe { DestroyWindow(hwnd()) };
     }
 }
 
@@ -171,18 +170,21 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             if hiword(w) == BN_CLICKED && l != 0 {
                 widgets::clicked(l as HWND); // checkboxes flip before the click is handled
             }
-            if with(|s| s.command(loword(w) as i32, hiword(w))) == Some(Some(Close)) {
+            if loword(w) as i32 == IDOK {
+                ui::click_focused_button(h); // Enter on a button presses it
+            } else if with(|s| s.command(loword(w) as i32, hiword(w))) == Some(true) {
                 DestroyWindow(h);
             }
-            // Updates that arrived while a dialog was open from this click are applied now.
-            if updates_waiting() {
-                poke();
-            }
+            MAIL.wake_if_waiting(); // mail that arrived while a dialog was open from this click
             return 0;
         }
         WM_CLOSE => {
             with(|s| s.commit_pending());
             DestroyWindow(h);
+            return 0;
+        }
+        WM_ACTIVATE => {
+            ui::keep_focus(h, w, 0);
             return 0;
         }
         WM_SIZE => {
@@ -194,8 +196,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
             return 0;
         }
         WM_DPICHANGED => {
-            let suggested = *(l as *const RECT);
-            with(|s| s.dpi_changed(hiword(w) as u32, suggested));
+            MAIL.post(Update::Dpi { dpi: hiword(w) as u32, suggested: *(l as *const RECT) });
             return 0;
         }
         WM_ERASEBKGND => {
@@ -212,7 +213,7 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
         WM_MEASUREITEM => {
             let mi = &mut *(l as *mut MEASUREITEMSTRUCT);
             if mi.CtlType == ODT_LISTBOX {
-                mi.itemHeight = layout::profile_item_height(GetDpiForWindow(h)) as u32;
+                mi.itemHeight = layout::profile_item_height(ui::dpi_of(h)) as u32;
                 return 1;
             }
         }
@@ -222,15 +223,12 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
                 return 1;
             }
             if dis.CtlType == ODT_LISTBOX {
-                with(|s| s.draw_profile(dis));
+                layout::draw_profile(dis); // needs no state, so it draws even while a dialog is open
                 return 1;
             }
         }
-        WM_SETTINGCHANGE if theme::is_theme_change(m, l) => {
-            theme::reload();
-            with(|s| s.retheme());
-        }
-        WM_UPDATE => {
+        WM_SETTINGCHANGE if theme::is_theme_change(m, l) => MAIL.post(Update::Theme),
+        WM_MAIL => {
             with(|s| s.apply_updates());
             return 0;
         }
@@ -240,8 +238,8 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
         }
         WM_DESTROY => {
             HWND_MAIN.store(0, Ordering::Relaxed);
+            MAIL.close();
             STATE.with(|s| s.take());
-            take_updates(); // for a window that's gone
             tray::post(tray::Event::MainWindowClosed);
             return 0;
         }
@@ -249,10 +247,6 @@ unsafe extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRES
     }
     DefWindowProcW(h, m, w, l)
 }
-
-/// What a command asks of the window.
-#[derive(PartialEq)]
-struct Close;
 
 // Control ids.
 const ID_PROFILES: i32 = 100;
@@ -270,21 +264,28 @@ const ID_NOTIFY: i32 = 111;
 const ID_DARK: i32 = 112;
 
 impl MainWindow {
-    fn command(&mut self, id: i32, code: u16) -> Option<Close> {
+    /// A control's notification. Returns true if the window should close.
+    fn command(&mut self, id: i32, code: u16) -> bool {
         if let Some(action) = monitor_cards::action(id, code) {
             self.monitor_action(action);
-            return None;
+            return false;
         }
         if let Some(action) = hotkey_cards::action(id, code) {
             self.hotkey_action(action);
-            return None;
+            return false;
         }
         match (id, code) {
             (ID_PROFILES, LBN_SELCHANGE) => self.select_from_list(),
             (ID_NEW, BN_CLICKED) => self.new_from_current(),
             (ID_DELETE, BN_CLICKED) => self.delete_profile(),
-            (ID_NAME, EN_CHANGE) => self.rename_profile(),
-            (ID_NAME, EN_SETFOCUS | EN_KILLFOCUS) => self.repaint_name_frame(),
+            (ID_NAME, EN_CHANGE) => {
+                self.c.name.on_command(code);
+                self.rename_profile();
+            }
+            (ID_NAME, EN_SETFOCUS | EN_KILLFOCUS) => {
+                self.c.name.on_command(code);
+                self.repaint_name_frame();
+            }
             (ID_ENABLED, BN_CLICKED) => self.toggle_enabled(),
             (ID_DETECT, BN_CLICKED) => self.detect(true),
             (ID_ADD_CONNECTED, BN_CLICKED) => self.add_connected(),
@@ -297,16 +298,16 @@ impl MainWindow {
             (ID_DARK, BN_CLICKED) => self.set_theme(if widgets::checked(self.c.dark) { Theme::Dark } else { Theme::Light }),
             (IDCANCEL, _) => {
                 self.commit_pending();
-                return Some(Close);
+                return true;
             }
             _ => {}
         }
-        None
+        false
     }
 
     fn apply_updates(&mut self) {
         let mut inputs_changed = false;
-        for update in take_updates() {
+        for update in MAIL.take() {
             match update {
                 Update::Connection { connected, active } => {
                     self.connected = connected;
@@ -315,6 +316,12 @@ impl MainWindow {
                     self.refresh_profiles(id.as_deref());
                 }
                 Update::Select(id) => self.refresh_profiles(id.as_deref()),
+                Update::Startup => widgets::set_checked(self.c.startup, sys::startup_enabled()),
+                Update::Theme => {
+                    theme::reload();
+                    self.retheme();
+                }
+                Update::Dpi { dpi, suggested } => self.dpi_changed(dpi, suggested),
                 Update::Detected { id, inputs, current } => inputs_changed |= self.on_detected(&id, inputs, current),
                 Update::DetectDone => self.on_detect_done(),
                 Update::Tested { id, result } => self.on_tested(&id, result),
@@ -363,7 +370,7 @@ impl MainWindow {
 
     fn set_theme(&mut self, choice: Theme) {
         self.config.theme = choice;
-        theme::set_choice(choice); // re-theme straight away; the tray sets it again when it saves
+        theme::set_dark(choice.dark()); // re-theme straight away; the tray sets it again when it saves
         self.retheme();
         self.commit();
     }

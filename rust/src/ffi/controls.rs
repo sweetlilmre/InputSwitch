@@ -35,6 +35,9 @@ pub struct MEASUREITEMSTRUCT {
 }
 
 pub const BN_CLICKED: u16 = 0;
+pub const BM_CLICK: u32 = 0x00F5;
+pub const BN_SETFOCUS: u16 = 6;
+pub const BS_NOTIFY: u32 = 0x4000;
 pub const ES_AUTOHSCROLL: u32 = 0x0080;
 pub const EN_CHANGE: u16 = 0x0300;
 pub const SS_ENDELLIPSIS: u32 = 0x4000;
@@ -63,10 +66,7 @@ pub const LBS_HASSTRINGS: u32 = 0x0040;
 pub const LB_GETTEXT: u32 = 0x0189;
 pub const LB_GETTEXTLEN: u32 = 0x018A;
 pub const LB_SETITEMHEIGHT: u32 = 0x01A0;
-pub const EM_SETMARGINS: u32 = 0x00D3;
 pub const EM_SETSEL: u32 = 0x00B1;
-pub const EC_LEFTMARGIN: usize = 0x1;
-pub const EC_RIGHTMARGIN: usize = 0x2;
 pub const ODT_LISTBOX: u32 = 2;
 pub const ODT_BUTTON: u32 = 4;
 pub const ODS_SELECTED: u32 = 0x0001;
