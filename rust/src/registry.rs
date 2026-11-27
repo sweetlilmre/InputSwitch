@@ -38,6 +38,23 @@ impl RegKey {
         (rc == 0 && kind == REG_SZ).then(|| from_wide(&buf))
     }
 
+    /// A value's raw bytes, whatever its type.
+    pub fn binary(&self, name: &str) -> Option<Vec<u8>> {
+        let name = wide(name);
+        let mut len = 0u32;
+        unsafe {
+            if RegQueryValueExW(self.0, name.as_ptr(), null_mut(), null_mut(), null_mut(), &mut len) != 0 || len == 0 {
+                return None;
+            }
+            let mut buf = vec![0u8; len as usize];
+            if RegQueryValueExW(self.0, name.as_ptr(), null_mut(), null_mut(), buf.as_mut_ptr(), &mut len) != 0 {
+                return None;
+            }
+            buf.truncate(len as usize);
+            Some(buf)
+        }
+    }
+
     pub fn set_string(&self, name: &str, value: &str) -> bool {
         let value = wide(value);
         unsafe { RegSetValueExW(self.0, wide(name).as_ptr(), 0, REG_SZ, value.as_ptr() as *const u8, (value.len() * 2) as u32) == 0 }

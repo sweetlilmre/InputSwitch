@@ -508,7 +508,7 @@ impl Tray {
             MenuAction::Run(i) => self.run_binding(i),
             MenuAction::SetInput(m, code) => {
                 std::thread::spawn(move || {
-                    if let Err(e) = monitors::set(&m, code) {
+                    if let Err(e) = monitors::switch_to(&m, code) {
                         post(Event::SwitchFailed(e));
                     }
                 });
