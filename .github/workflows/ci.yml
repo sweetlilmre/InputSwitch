@@ -1,13 +1,14 @@
-# Builds InputSwitch, runs the smoke tests, and on main packages the release files.
+# Builds InputSwitch, runs the tests, and on main packages the release files.
 #
 # One job, so each binary is built once and the files that are tested are the files that ship:
-#   1. logic smoke tests;
-#   2. publish the x64 full and slim single-file builds and launch-test both;
-#   3. on pushes to main only: publish the Arm64 builds, zip all four with checksums, and keep
-#      them as the "release-files" artifact. Tagging that commit vX.Y.Z publishes exactly those
-#      files; the release workflow doesn't rebuild anything.
+#   1. clippy (warnings are errors) and the unit tests;
+#   2. build the x64 release exe and launch-test it;
+#   3. on pushes to main only: build the Arm64 exe, zip both with checksums, and keep them as
+#      the "release-files" artifact. Tagging that commit vX.Y.Z publishes exactly those files;
+#      the release workflow doesn't rebuild anything.
 #
-# Make "Build and smoke test" a required status check so a PR can't merge until it passes
+# The Rust version comes from rust-toolchain.toml (rustup on the runner installs it).
+# Make "Build and test" a required status check so a PR can't merge until it passes
 # (see docs/TECHNICAL.md).
 
 name: CI
@@ -28,62 +29,52 @@ concurrency:
 
 jobs:
   build:
-    name: Build and smoke test
+    name: Build and test
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       # Package release files only for pushes to main.
       PACKAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      CARGO_TERM_COLOR: always
 
     steps:
       - name: Check out
         uses: actions/checkout@v7
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
-      - name: Logic smoke tests
-        run: dotnet run -c Release --project tests/InputSwitch.SmokeTests -p:ContinuousIntegrationBuild=true
-
-      - name: Publish
+      - name: Set up Rust
         shell: pwsh
         run: |
-          # Two single-file builds per architecture:
-          #   full - .NET runtime built in, nothing else to install (large)
-          #   slim - uses the installed .NET 10 Desktop Runtime (small)
+          rustup show active-toolchain
+          if ($env:PACKAGE -eq 'true') { rustup target add aarch64-pc-windows-msvc }
+
+      - name: Clippy
+        run: cargo clippy --release --locked -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --release --locked
+
+      - name: Build
+        shell: pwsh
+        run: |
           # Arm64 is only needed for release files, so it's skipped on pull requests.
-          $rids = if ($env:PACKAGE -eq 'true') { 'win-x64', 'win-arm64' } else { 'win-x64' }
-          $common = @('-c', 'Release', '-p:DebugType=none', '-p:ContinuousIntegrationBuild=true', '-p:PublishSingleFile=true')
-          foreach ($rid in $rids) {
-            foreach ($flavour in 'full', 'slim') {
-              $runtime = if ($flavour -eq 'full') {
-                @('--self-contained', '-p:IncludeNativeLibrariesForSelfExtract=true')
-              } else {
-                @('--self-contained', 'false')
-              }
-              dotnet publish InputSwitch.csproj @common -r $rid @runtime -o "out/$rid-$flavour"
-              if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            }
+          $targets = if ($env:PACKAGE -eq 'true') { 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
+          foreach ($target in $targets) {
+            cargo build --release --locked --target $target
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
 
-      - name: Launch smoke test (x64 full)
+      - name: Launch smoke test (x64)
         shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-full/InputSwitch.exe
-
-      - name: Launch smoke test (x64 slim)
-        shell: pwsh
-        run: ./tests/launch-smoke.ps1 -Exe out/win-x64-slim/InputSwitch.exe
+        run: ./tests/launch-smoke.ps1 -Exe target/x86_64-pc-windows-msvc/release/InputSwitch.exe
 
       - name: Zip release files
         if: env.PACKAGE == 'true'
         shell: pwsh
         run: |
-          $version = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
           New-Item -ItemType Directory -Force dist | Out-Null
-          foreach ($dir in Get-ChildItem out -Directory) {
-            Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist/InputSwitch-$version-$($dir.Name).zip"
+          foreach ($arch in @{ 'x64' = 'x86_64-pc-windows-msvc'; 'arm64' = 'aarch64-pc-windows-msvc' }.GetEnumerator()) {
+            Compress-Archive -Path "target/$($arch.Value)/release/InputSwitch.exe" -DestinationPath "dist/InputSwitch-$version-win-$($arch.Key).zip"
           }
           Get-ChildItem dist/*.zip | ForEach-Object {
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name

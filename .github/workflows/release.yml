@@ -1,10 +1,10 @@
 # Publishes a GitHub release when a version tag is pushed. Nothing is rebuilt: the release is made
 # from the files CI built and tested when that commit landed on main.
 #
-#   1. Bump <VersionPrefix> in InputSwitch.csproj and merge that to main; wait for CI to pass.
+#   1. Bump `version` in Cargo.toml and merge that to main; wait for CI to pass.
 #   2. Tag the merge commit:  git tag v1.2.0 && git push origin v1.2.0
 #
-# The tag must be vMAJOR.MINOR.PATCH and match VersionPrefix, and the tagged commit must have a
+# The tag must be vMAJOR.MINOR.PATCH and match Cargo.toml's version, and the tagged commit must have a
 # successful CI run on main whose release files haven't expired (they're kept for 90 days).
 # To mark a release as a pre-release, edit it on GitHub after it's published.
 
@@ -41,9 +41,9 @@ jobs:
             exit 1
           }
           $version = $Matches.version
-          $project = (Select-Xml -Path InputSwitch.csproj -XPath '//VersionPrefix').Node.InnerText.Trim()
+          $project = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
           if ($project -ne $version) {
-            Write-Output "::error::Tag $env:TAG doesn't match <VersionPrefix>$project</VersionPrefix> in InputSwitch.csproj. Bump VersionPrefix (or fix the tag) and tag again."
+            Write-Output "::error::Tag $env:TAG doesn't match version = `"$project`" in Cargo.toml. Bump the version (or fix the tag) and tag again."
             exit 1
           }
           $commit = git rev-parse "$env:TAG^{commit}"
@@ -87,7 +87,7 @@ jobs:
           COMMIT: ${{ steps.version.outputs.commit }}
         run: |
           Push-Location dist
-          $expected = foreach ($rid in 'win-x64', 'win-arm64') { foreach ($f in 'full', 'slim') { "InputSwitch-$env:VERSION-$rid-$f.zip" } }
+          $expected = foreach ($arch in 'x64', 'arm64') { "InputSwitch-$env:VERSION-win-$arch.zip" }
           $missing = $expected | Where-Object { -not (Test-Path $_) }
           if ($missing) { Write-Output "::error::Release files missing: $($missing -join ', ')"; exit 1 }
 

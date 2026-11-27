@@ -6,9 +6,9 @@ This is the developer and power-user companion to the [user guide](../README.md)
 
 ## Contents
 
-- [Building and publishing](#building-and-publishing)
+- [Building](#building)
 - [Versioning and releases](#versioning-and-releases)
-- [Smoke tests and CI](#smoke-tests-and-ci)
+- [Tests and CI](#tests-and-ci)
 - [Project layout](#project-layout)
 - [How it works](#how-it-works)
 - [The settings file](#the-settings-file)
@@ -19,40 +19,29 @@ This is the developer and power-user companion to the [user guide](../README.md)
 
 ---
 
-## Building and publishing
+## Building
 
-You need the **.NET 10 SDK**; `global.json` pins the feature band. The app has no third-party dependencies.
-
-```
-dotnet build -c Release
-bin\Release\net10.0-windows\InputSwitch.exe
-```
-
-A single executable that doesn't need .NET installed, as the release workflow builds it:
+You need **Rust** with the MSVC toolchain (and so the Visual Studio C++ build tools). `rust-toolchain.toml` pins the Rust version, and rustup installs it on the first build. There are no dependencies at all: no crates, not even Windows binding crates.
 
 ```
-dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+cargo build --release          # target\release\InputSwitch.exe
+cargo test --release           # unit tests
+cargo clippy --release         # lints (CI treats warnings as errors)
 ```
 
-`IncludeNativeLibrariesForSelfExtract` is needed because WPF has native libraries. The result is large (about 165 MB for x64, 180 MB for Arm64), because it carries the whole .NET desktop runtime, and WPF and WinForms can't be trimmed.
+The result is a single exe of about 0.4 MB that needs nothing else installed. For Arm64, add the target once (`rustup target add aarch64-pc-windows-msvc`) and build with `--target aarch64-pc-windows-msvc`.
 
-A **slim** single exe of about 0.3 MB, using the installed **.NET 10 Desktop Runtime**:
-
-```
-dotnet publish InputSwitch.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
-```
-
-The running app locks `InputSwitch.exe`, so exit it from the tray before rebuilding Release. A Debug build (`dotnet build -c Debug`) is a quick way to check the code compiles while it's running.
+The running app locks `InputSwitch.exe`, so exit it from the tray before rebuilding. `cargo check` or `cargo clippy` checks the code while it's running.
 
 ## Versioning and releases
 
-The version lives in one place: `<VersionPrefix>` in `InputSwitch.csproj`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. The SDK derives the assembly and file versions from it, and appends the git commit to the informational version, e.g. `0.1.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the main window's left-hand pane, and in the diagnostic report (`AppInfo.cs`).
+The version lives in one place: `version` in `Cargo.toml`. It follows [semantic versioning](https://semver.org/): bump the patch number for fixes, the minor for new features, and the major for breaking changes. `build.rs` stamps it into the exe's version resource, with the git commit appended to the product version, e.g. `0.3.0+d3e334f…`. The app shows the version in the tray menu, at the bottom of the main window's left-hand pane, and in the diagnostic report (`src/sys.rs`).
 
 Releases are **built once**. Every merge to `main` packages the release files, and tagging that commit publishes exactly those files, with nothing rebuilt.
 
 **To cut a release:**
 
-1. In a pull request, bump `<VersionPrefix>` (e.g. `0.1.0` → `0.2.0`) and merge it once CI passes.
+1. In a pull request, bump `version` in `Cargo.toml` (e.g. `0.2.0` → `0.3.0`) and merge it once CI passes.
 2. Wait for CI on `main` to pass for the merge commit.
 3. Tag the merge commit and push the tag:
    ```
@@ -63,14 +52,14 @@ Releases are **built once**. Every merge to `main` packages the release files, a
 
 Tags must be plain `vMAJOR.MINOR.PATCH`. The release is a full release marked **Latest**. To make one a pre-release, edit it on GitHub afterwards and tick **Set as a pre-release**. Suffixed tags such as `v0.2.0-beta.1` are refused, because the version is built into the files when they land on `main`, before any tag exists.
 
-**On every push to `main`**, CI (see [Smoke tests and CI](#smoke-tests-and-ci)) publishes a **full** and a **slim** single-file build for **win-x64** and **win-arm64**, and launch-tests both x64 builds. It then zips all four with `SHA256SUMS.txt`, and keeps them on the run as the `release-files` artifact for **90 days**.
+**On every push to `main`**, CI (see [Tests and CI](#tests-and-ci)) builds the exe for **x64** and **Arm64**, and launch-tests the x64 one. It then zips both with `SHA256SUMS.txt`, and keeps them on the run as the `release-files` artifact for **90 days**.
 
 **On a version tag**, the **Release** workflow (`.github/workflows/release.yml`):
 
-1. checks the tag is `vMAJOR.MINOR.PATCH` and matches `VersionPrefix`;
+1. checks the tag is `vMAJOR.MINOR.PATCH` and matches `version` in `Cargo.toml`;
 2. finds the successful CI run on `main` for the tagged commit, and stops if there isn't one;
 3. downloads that run's `release-files`;
-4. checks all four zips are present, the checksums match, and each exe's version stamp is exactly `<version>+<tagged commit>`;
+4. checks both zips are present, the checksums match, and each exe's version stamp is exactly `<version>+<tagged commit>`;
 5. creates the GitHub release with generated release notes, the zips and `SHA256SUMS.txt`.
 
 This takes about a minute. If it stops, the error says why. The usual causes are:
@@ -81,55 +70,56 @@ This takes about a minute. If it stops, the error says why. The usual causes are
 
 | Release file | For |
 |---|---|
-| `InputSwitch-<version>-win-x64-full.zip` | Most PCs. .NET runtime built in, nothing else to install (about 68 MB zipped). |
-| `InputSwitch-<version>-win-x64-slim.zip` | PCs that already have the .NET 10 Desktop Runtime. Tiny download. |
-| `InputSwitch-<version>-win-arm64-full.zip` | Arm laptops (e.g. Snapdragon). Nothing else to install. |
-| `InputSwitch-<version>-win-arm64-slim.zip` | Arm laptops with the .NET 10 Desktop Runtime. |
+| `InputSwitch-<version>-win-x64.zip` | Most PCs. |
+| `InputSwitch-<version>-win-arm64.zip` | Arm laptops (e.g. Snapdragon). |
 | `SHA256SUMS.txt` | Checksums for the zips. |
 
 To redo a release, delete the release and its tag (`gh release delete v0.2.0 --cleanup-tag --yes` and `git tag -d v0.2.0`), then tag again.
 
 Keep the repository private or internal to the company's GitHub organisation, so releases are only visible to colleagues. Check with the AI Engineering team before making it more widely available.
 
-## Smoke tests and CI
+## Tests and CI
 
-There are two layers of smoke tests. Neither needs monitors, and neither changes anything on the machine.
+Neither kind of test needs monitors, and neither changes anything on the machine.
 
 | Test | What it checks | Run locally |
 |---|---|---|
-| **Logic** (`tests/InputSwitch.SmokeTests`) | Capabilities parsing (with real Dell strings), EDID parsing, setup fingerprinting and matching, hotkey rules and display, action descriptions, settings round-trip. A plain console runner with no test-framework packages. | `dotnet run -c Release --project tests/InputSwitch.SmokeTests` |
-| **Launch** (`tests/launch-smoke.ps1`) | Starts the real exe. `--diagnose` writes a report; `--settings` opens the window and it renders (found through UI Automation); no error dialog appears; the app stays up. Saves the report, plus a screenshot if `-Capture` points at WindowCapture (CI doesn't use this). | `pwsh tests/launch-smoke.ps1 -Exe bin\Release\net10.0-windows\InputSwitch.exe` |
+| **Unit tests** (`#[cfg(test)]` modules in `src/`) | Capabilities parsing (with real Dell strings), EDID parsing, setup matching, hotkey names, and the settings file (round trip, older files, encodings, JSON edge cases). | `cargo test --release` |
+| **Launch** (`tests/launch-smoke.ps1`) | Starts the real exe. `--diagnose` writes a report; `--settings` opens the main window and it renders (found through UI Automation); no error dialog appears; the app stays up. Saves the report, plus a screenshot if `-Capture` points at WindowCapture (CI doesn't use this). | `pwsh tests/launch-smoke.ps1 -Exe target\release\InputSwitch.exe` |
 
 The launch test sets `INPUTSWITCH_CONFIG_DIR` to a throwaway folder. The app then uses that folder for its settings, and a separate single-instance lock, so the test never touches your real settings and runs fine while your own copy is in the tray. It never switches an input.
 
-The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It's a single job, **Build and smoke test**, on `windows-latest`. Each binary is built once, and the launch tests run against the files that ship:
+The **CI** workflow (`.github/workflows/ci.yml`) runs on every pull request to `main`, every push to `main`, and on demand. It's a single job, **Build and test**, on `windows-latest`. Each binary is built once, and the launch test runs against the file that ships:
 
-1. runs the logic smoke tests;
-2. publishes the **x64 full** and **x64 slim** single-file builds and launch-tests both;
-3. on pushes to `main` only: also publishes the Arm64 builds, zips all four with checksums, and keeps them as the `release-files` artifact (see [Versioning and releases](#versioning-and-releases)).
+1. clippy (warnings are errors) and the unit tests;
+2. builds the **x64** exe and launch-tests it;
+3. on pushes to `main` only: also builds the **Arm64** exe, zips both with checksums, and keeps them as the `release-files` artifact (see [Versioning and releases](#versioning-and-releases)).
 
-Pull requests skip step 3, which takes a while. Apart from the release files, nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
+Apart from the release files, nothing is uploaded; everything is in the run log. If a launch check fails, the test prints the diagnostic report into the log.
 
-**Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and smoke test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
+**Require it before merging.** In the repository's **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), add a rule for `main` that requires a pull request, and requires the status check **Build and test** to pass. Optionally, also block direct pushes and force-pushes to `main`. CI can't enforce this itself; the rule has to be set in GitHub.
 
 ## Project layout
 
 | Path | Contents |
 |---|---|
-| `Program.cs` | Entry point: single-instance check, `--diagnose`, `--settings`. |
-| `AppInfo.cs` | Version and commit, read from the assembly attributes. |
-| `TrayApp.cs` | The tray icon and menu, display-change handling, profile activation and hotkey registration. |
-| `Startup.cs` | "Start with Windows" (per-user Run key). |
-| `TrayIconFactory.cs` | Draws the tray and window icon at runtime (no `.ico` file). |
-| `Config/` | `AppConfig` (data model), `ConfigStore` (JSON load/save), `ProfileMatcher` (which configuration fits the connected monitors). |
-| `Hotkeys/` | `Hotkey` (key + modifiers) and `SystemWindow` (hidden window that owns the global hotkeys and receives display/device broadcasts). |
-| `Monitors/` | `MonitorService` (enumeration and DDC/CI), `Edid`, `InputSources` (VCP 0x60 names and capabilities parsing), `InputSwitcher` (switch/toggle/cycle logic). |
-| `Native/` | P/Invoke declarations: user32, dxva2, and the CCD display-configuration API. |
-| `UI/` | WPF windows: settings (`ConfigWindow`), hotkey editor (`BindingEditorWindow`), themed dialog (`FluentDialog`), shared styles and view models, and the WinForms/WPF bridge (`WpfHost`, `SettingsWindow`). |
-| `tests/` | Smoke tests: logic (`InputSwitch.SmokeTests`) and launch (`launch-smoke.ps1`). |
-| `tools/WindowCapture/` | Developer screenshot tool (separate project, excluded from the app build). |
+| `src/main.rs` | Entry point: crash log, `--diagnose`, single-instance check, `--settings`. |
+| `src/tray.rs` | The tray icon and menu, display-change handling, choosing the active configuration, hotkey registration, notifications. |
+| `src/config.rs`, `src/json.rs` | The settings model and file, and a small JSON reader and writer for it. |
+| `src/matcher.rs` | Which configuration fits the connected monitors. |
+| `src/hotkey.rs`, `src/reserved.rs` | Hotkeys (key and modifiers, and their names in the file), and the Windows shortcuts warned about when saving one. |
+| `src/monitors/` | Enumeration (CCD API) and identities (`edid.rs`), input codes and capabilities parsing (`inputs.rs`), DDC/CI (`ddc.rs`), and the switch, toggle and cycle logic (`switch.rs`). |
+| `src/main_window/` | The main window: layout, the configurations list, and the Monitors and Hotkeys cards. |
+| `src/hotkey_editor/` | The hotkey editor, its key-capture box (Win key included, via a short-lived keyboard hook) and its inputs list. |
+| `src/ui/` | A small Win32 UI toolkit with a Fluent look: the theme (light and dark, accent colour), fonts, drawing, owner-drawn buttons, check boxes, switches and drop-downs, text boxes, themed dialogs, a scrolling card panel, and a mailbox for messages from background threads. |
+| `src/ffi/` | Hand-written Windows API declarations, only what's used, grouped by area. |
+| `src/sys.rs`, `src/registry.rs`, `src/diagnose.rs` | Version, ids, time and Start with Windows; registry access; the `--diagnose` report. |
+| `build.rs` | Embeds `app.manifest` (Common Controls 6, per-monitor DPI awareness) and writes the resource file with the icon (`assets/InputSwitch.ico`) and version information, with no resource compiler. |
+| `tests/launch-smoke.ps1` | The launch test. |
+| `tools/WindowCapture/` | Developer screenshot tool (a separate C# project, not part of the app). |
 | `.github/workflows/` | CI (`ci.yml`) and release (`release.yml`). |
-| `global.json` | Pins the .NET SDK feature band for local and CI builds. |
+
+The release profile optimises for size: `opt-level = "z"`, LTO, one codegen unit, abort on panic, symbols stripped. A panic writes `crash.txt` to the settings folder, since a windowed app has nowhere to print it.
 
 ## How it works
 
@@ -156,33 +146,32 @@ A monitor's ID is `<manufacturer><product code>#<serial>`, e.g. `DELD0D9#BPG5ZT2
 
 ### Choosing a configuration
 
-A setup's **fingerprint** is the set of IDs of the connected *external* monitors. The built-in panel is excluded, so lid open/closed doesn't matter. `ProfileMatcher.Match`:
+A setup's **fingerprint** is the set of IDs of the connected *external* monitors. The built-in panel is excluded, so lid open/closed doesn't matter. `matcher::find`:
 
 1. returns a configuration whose monitor set **equals** the fingerprint (the first in list order if several);
 2. otherwise considers configurations whose monitor set is a **superset** of the fingerprint. This handles a monitor that's switched off, or one that drops off after being switched to another source. It prefers the currently active configuration, then the one with the fewest monitors, then the oldest;
-3. otherwise reports an unknown setup. `TrayApp` then creates a configuration for it with hotkeys disabled. On the very first run (no configurations at all) it opens the main window; otherwise it shows a notification.
+3. otherwise reports an unknown setup. The tray then creates a configuration for it with hotkeys disabled. On the very first run (no configurations at all) it opens the main window; otherwise it shows a notification.
 
 An empty fingerprint (no external monitors) matches nothing and creates nothing.
 
 ### Detecting changes
 
-Re-evaluation is triggered by `WM_DISPLAYCHANGE` and `WM_DEVICECHANGE`, received on a hidden top-level window (message-only windows don't receive these broadcasts). It's also triggered by `SystemEvents.DisplaySettingsChanged`, by resume from sleep, and by session unlock. Events are debounced for 2.5 seconds, because docking produces a burst of them as monitors come up one at a time.
+Re-evaluation is triggered by `WM_DISPLAYCHANGE` and `WM_DEVICECHANGE`, received on a hidden top-level window (message-only windows don't receive these broadcasts). It's also triggered by resume from sleep and by session unlock. Events are debounced for 2.5 seconds, because docking produces a burst of them as monitors come up one at a time.
 
 ### Hotkeys
 
-Hotkeys are registered with `RegisterHotKey` (with `MOD_NOREPEAT`) on the hidden window, and only for the active configuration when it's enabled. A combination must include Ctrl, Alt or Win, or be F13–F24. All hotkeys are unregistered while the hotkey editor is open (`ConfigWindow` raises `CapturingHotkey` around it), so combinations can be recorded and an accidental press won't switch a screen. They're registered again as soon as it closes. The editor opens with focus on the Monitor list; the key box only records once the user clicks or tabs into it.
+Hotkeys are registered with `RegisterHotKey` (with `MOD_NOREPEAT`) on the hidden window, and only for the active configuration when it's enabled. A combination must include Ctrl, Alt or Win, or be F13–F24. All hotkeys are unregistered while the hotkey editor is open, so combinations can be recorded and an accidental press won't switch a screen. They're registered again as soon as it closes. The key box only records once the user clicks or tabs into it; while it's listening, a short-lived low-level keyboard hook stops Windows acting on the Win key. On Save, the editor refuses combinations Windows or another app already owns, and warns about known Windows shortcuts.
 
 A binding with one input sets that input. With several inputs, it reads the current input and moves to the next in the list, wrapping around. If the monitor doesn't answer, as some don't right after a switch, it uses the input it last set. If the current input isn't in the list, it goes to the first.
 
 ### User interface
 
-- **Tray, hotkeys and display detection** run on WinForms, and the WinForms message loop drives the app.
-- **Windows and dialogs** are WPF with the built-in **Fluent** theme (`Application.ThemeMode`), which uses Mica on Windows 11. `ThemeMode` comes from the `Theme` setting: `System` follows the Windows light/dark setting, `Light` and `Dark` override it. The tray holds it in `UiTheme`, which has no WPF types, so WPF still loads only when a window opens. `ThemeMode` is marked experimental, so `WPF0001` is suppressed in the project file.
-- **WPF is loaded lazily.** `TrayApp` only talks to the main window through `ISettingsWindow`, which contains no WPF types. That way the JIT doesn't load WPF assemblies until a window is first created (`WpfHost.EnsureInitialized`). `AppDialogs` does the same for dialogs shown outside a window, such as at startup.
-- **Keyboard input in the modeless main window** relies on `ElementHost.EnableModelessKeyboardInterop`.
-- **The main window saves as you go.** There's no draft and no Save button. After every change, `ConfigWindow` raises `Changed` with a copy of the configuration; `TrayApp` saves it, re-matches the active configuration, and re-registers the hotkeys. Typed names are committed 0.7 s after typing stops, and on close. While the window is open, the tray doesn't create new configurations or show "setup changed" notifications, so the list doesn't change under the user; that happens when it closes. Registration failures are only reported when they change, not on every edit.
-- **The Close button in the modeless window closes it explicitly**, because `IsCancel` only closes modal dialogs.
-- **WinForms and WPF share many type names**, so the project removes the global `System.Windows.Forms` and `System.Drawing` usings, and each file imports what it needs.
+- **Plain Win32, no framework.** Windows, controls and dialogs are created with the Windows API and drawn with GDI. Buttons, check boxes, switches, drop-downs and cards are owner-drawn in a WinUI-like style, with Segoe Fluent Icons glyphs.
+- **Light and dark.** The palette follows Windows' app mode and accent colour, live, unless the `Theme` setting overrides it. Title bars use a documented DWM attribute; dark scroll bars, edit boxes and menus use uxtheme functions exported only by ordinal (the ones Explorer uses). If those are missing, those controls stay light.
+- **Per-monitor DPI.** Layout is written at 96 DPI and scaled; fonts are recreated when a window moves to a monitor with a different DPI.
+- **Background work.** DDC/CI is slow, so reading inputs, detecting capabilities and switching run on threads. They report back through a mailbox (`ui::Mailbox`): a queue plus a posted window message, with a generation number so results meant for a window that has since closed are dropped.
+- **Window state** lives in a thread-local slot that's lent out for one message at a time (`ui::Slot`). Messages that arrive while it's lent out, such as those a window sends itself while changing its own controls, skip the window's handling.
+- **The main window saves as you go.** There's no draft and no Save button. After every change, it posts a copy of the configuration to the tray, which saves it, re-matches the active configuration, and re-registers the hotkeys. Typed names are committed shortly after typing stops, and on close. While the window is open, the tray doesn't create new configurations or show "setup changed" notifications, so the list doesn't change under the user; that happens when it closes. Registration failures are only reported when they change, not on every edit.
 
 ## The settings file
 
@@ -221,9 +210,8 @@ Stored at `%APPDATA%\InputSwitch\config.json`, or in the folder named by the `IN
 ```
 
 - `Theme` is `System` (follow Windows, the default when it's missing), `Light` or `Dark`. The **Dark mode** switch sets `Light` or `Dark`.
-
 - `SupportedInputs` and `Inputs` are VCP 0x60 codes in decimal (15 = `0x0F` DisplayPort 1, 17 = `0x11` HDMI 1).
-- `Key` is a `System.Windows.Forms.Keys` name. `Modifiers` is any combination of `Alt`, `Control`, `Shift` and `Win`.
+- `Key` is a .NET `Keys` name, as older (C#) versions of InputSwitch wrote it, so their settings files load unchanged. `Modifiers` is any combination of `Alt`, `Control`, `Shift` and `Win`.
 
 **Start with Windows** writes a `InputSwitch` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`. No admin rights are needed.
 
@@ -252,11 +240,11 @@ Standard MCCS VCP `0x60` values. Monitors implement a subset, and some manufactu
 
 To use an input a monitor doesn't list, open the hotkey editor, type its code in **Other input code (hex)** and click **Add**. Monitor manuals and forums often give the exact codes for a model.
 
-USB-C has no standard code. The two listed are what those Dell models report. New names go in `Monitors/InputSources.cs`.
+USB-C has no standard code. The two listed are what those Dell models report. New names go in `src/monitors/inputs.rs`.
 
 ## Developer tool: window screenshots
 
-`tools/WindowCapture` saves a window to PNG using **Windows.Graphics.Capture**. Use it rather than GDI screen copies (`Graphics.CopyFromScreen` / `BitBlt`), which return blank white images for WPF dialogs. It captures windows even when they're covered, and never brings them to the front.
+`tools/WindowCapture` saves a window to PNG using **Windows.Graphics.Capture**. Use it rather than GDI screen copies (`Graphics.CopyFromScreen` / `BitBlt`), which can return blank images for composited windows. It captures windows even when they're covered, and never brings them to the front.
 
 ```
 dotnet build -c Release tools\WindowCapture
@@ -269,7 +257,7 @@ tools\WindowCapture\bin\Release\net10.0-windows10.0.22621.0\WindowCapture.exe --
 
 Windows are listed and searched front to back, so when a dialog shares its owner's title ("InputSwitch"), the dialog is the one captured. It targets `net10.0-windows10.0.22621.0`, which uses Microsoft's Windows SDK projection, to get the WinRT capture APIs.
 
-When driving the UI with UI Automation for tests, list the open windows first. `InvokePattern` clicks buttons even behind an open modal dialog.
+It's a small C# project of its own (it needs the .NET 10 SDK); the app doesn't use it. When driving the UI from a test script, list the open windows first: a message posted to a button clicks it even behind an open modal dialog.
 
 ## Known limitations
 
@@ -277,3 +265,4 @@ When driving the UI with UI Automation for tests, list the open windows first. `
 - Whether a monitor still accepts commands on an input it isn't currently showing depends on the model.
 - In clone (duplicate) mode, mapping a physical monitor to its handle relies on the order Windows reports them.
 - Many `Win +` combinations are reserved by Windows and can't be registered.
+
