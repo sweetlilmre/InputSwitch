@@ -161,6 +161,9 @@ fn fallback(owner: HWND, icon: Icon, heading: &str, message: &str, buttons: &[&s
 
 /// Height of `text` wrapped to `width`.
 fn measure(text: &str, font: HFONT, width: i32) -> i32 {
+    if text.is_empty() {
+        return 0;
+    }
     let w: Vec<u16> = text.encode_utf16().collect();
     let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
     unsafe {
@@ -186,7 +189,7 @@ impl Dialog {
 
         // Icon badge: a tinted circle with a Segoe Fluent Icons glyph.
         let (glyph, fg, bg) = match self.icon {
-            Icon::Warning => ('\u{E7BA}', if p.dark { theme::rgb(252, 225, 0) } else { theme::rgb(157, 93, 0) }, p.caution),
+            Icon::Warning => ('\u{E7BA}', theme::caution_text(), p.caution),
             Icon::Info => ('\u{E946}', p.accent, theme::mix(p.window, p.accent, if p.dark { 0.25 } else { 0.15 })),
         };
         let badge = RECT { left: sc(PAD), top: sc(22), right: sc(PAD + BADGE), bottom: sc(22 + BADGE) };

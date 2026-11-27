@@ -184,12 +184,6 @@ pub struct LVITEMW {
 }
 
 #[repr(C)]
-pub struct NMLVDISPINFOW {
-    pub hdr: NMHDR,
-    pub item: LVITEMW,
-}
-
-#[repr(C)]
 pub struct INITCOMMONCONTROLSEX {
     pub dwSize: u32,
     pub dwICC: u32,
@@ -377,7 +371,6 @@ pub const IDCANCEL: i32 = 2;
 pub const LVS_REPORT: u32 = 0x0001;
 pub const LVS_SINGLESEL: u32 = 0x0004;
 pub const LVS_SHOWSELALWAYS: u32 = 0x0008;
-pub const LVS_EDITLABELS: u32 = 0x0200;
 pub const LVS_NOCOLUMNHEADER: u32 = 0x4000;
 pub const LVS_NOSORTHEADER: u32 = 0x8000;
 pub const LVS_EX_CHECKBOXES: u32 = 0x0004;
@@ -395,7 +388,6 @@ pub const LVM_GETITEMW: u32 = 0x104B;
 pub const LVM_INSERTITEMW: u32 = 0x104D;
 pub const LVM_INSERTCOLUMNW: u32 = 0x1061;
 pub const LVM_SETITEMTEXTW: u32 = 0x1074;
-pub const LVM_EDITLABELW: u32 = 0x1076;
 pub const LVIF_TEXT: u32 = 0x1;
 pub const LVIF_STATE: u32 = 0x8;
 pub const LVIF_PARAM: u32 = 0x4;
@@ -405,9 +397,7 @@ pub const LVIS_FOCUSED: u32 = 0x1;
 pub const LVIS_SELECTED: u32 = 0x2;
 pub const LVIS_STATEIMAGEMASK: u32 = 0xF000;
 pub const LVNI_SELECTED: isize = 0x2;
-pub const NM_DBLCLK: u32 = (-3i32) as u32;
 pub const LVN_ITEMCHANGED: u32 = (-101i32) as u32;
-pub const LVN_ENDLABELEDITW: u32 = (-176i32) as u32;
 
 pub const ICC_LISTVIEW_CLASSES: u32 = 0x0001;
 pub const ICC_STANDARD_CLASSES: u32 = 0x4000;
@@ -741,7 +731,43 @@ extern "system" {
     pub fn GetDC(h: HWND) -> HDC;
     pub fn ReleaseDC(h: HWND, hdc: HDC) -> i32;
     pub fn MessageBeep(kind: u32) -> BOOL;
+    pub fn BeginPaint(h: HWND, ps: *mut PAINTSTRUCT) -> HDC;
+    pub fn EndPaint(h: HWND, ps: *const PAINTSTRUCT) -> BOOL;
+    pub fn SetScrollInfo(h: HWND, bar: i32, si: *const SCROLLINFO, redraw: BOOL) -> i32;
+    pub fn GetParent(h: HWND) -> HWND;
 }
+
+#[repr(C)]
+pub struct PAINTSTRUCT {
+    pub hdc: HDC,
+    pub fErase: BOOL,
+    pub rcPaint: RECT,
+    pub fRestore: BOOL,
+    pub fIncUpdate: BOOL,
+    pub rgbReserved: [u8; 32],
+}
+
+#[repr(C)]
+pub struct SCROLLINFO {
+    pub cbSize: u32,
+    pub fMask: u32,
+    pub nMin: i32,
+    pub nMax: i32,
+    pub nPage: u32,
+    pub nPos: i32,
+    pub nTrackPos: i32,
+}
+
+pub const WM_PAINT: u32 = 0x000F;
+pub const WM_VSCROLL: u32 = 0x0115;
+pub const WM_MOUSEWHEEL: u32 = 0x020A;
+pub const EN_SETFOCUS: u16 = 0x0100;
+pub const EN_KILLFOCUS: u16 = 0x0200;
+pub const SB_VERT: i32 = 1;
+pub const SIF_RANGE: u32 = 0x1;
+pub const SIF_PAGE: u32 = 0x2;
+pub const SIF_POS: u32 = 0x4;
+pub const SRCCOPY: u32 = 0x00CC_0020;
 
 #[link(name = "gdi32")]
 extern "system" {
@@ -750,6 +776,10 @@ extern "system" {
     pub fn RoundRect(hdc: HDC, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) -> BOOL;
     pub fn SetBkMode(hdc: HDC, mode: i32) -> i32;
     pub fn GetStockObject(i: i32) -> isize;
+    pub fn CreateCompatibleDC(hdc: HDC) -> HDC;
+    pub fn CreateCompatibleBitmap(hdc: HDC, w: i32, h: i32) -> isize;
+    pub fn BitBlt(dst: HDC, x: i32, y: i32, w: i32, h: i32, src: HDC, sx: i32, sy: i32, rop: u32) -> BOOL;
+    pub fn DeleteDC(hdc: HDC) -> BOOL;
 }
 
 #[link(name = "kernel32")]
@@ -766,7 +796,6 @@ pub const NM_CUSTOMDRAW: u32 = (-12i32) as u32;
 pub const CDDS_PREPAINT: u32 = 0x0000_0001;
 pub const CDDS_ITEMPREPAINT: u32 = 0x0001_0001;
 pub const CDRF_NOTIFYITEMDRAW: LRESULT = 0x20;
-pub const LVM_GETCOLUMNWIDTH: u32 = 0x101D;
 
 #[repr(C)]
 pub struct NMCUSTOMDRAW {

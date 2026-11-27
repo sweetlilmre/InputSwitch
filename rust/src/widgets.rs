@@ -15,7 +15,6 @@ pub const ICON_DELETE: char = '\u{E74D}';
 pub const ICON_REFRESH: char = '\u{E72C}';
 pub const ICON_EDIT: char = '\u{E70F}';
 pub const ICON_PLAY: char = '\u{E768}';
-pub const ICON_RENAME: char = '\u{E8AC}';
 pub const ICON_UP: char = '\u{E70E}';
 pub const ICON_DOWN: char = '\u{E70D}';
 const ICON_CHECK: char = '\u{E73E}';
@@ -212,6 +211,7 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
     let gap = s(8);
     let text_w = measure(hdc, &text, font);
     let icon_w = if icon.is_some() { s(16) } else { 0 };
+    let gap = if text.is_empty() { 0 } else { gap }; // icon-only buttons centre the icon
     let total = text_w + if icon.is_some() { icon_w + gap } else { 0 };
     let mut x = r.left + ((r.right - r.left) - total).max(0) / 2;
     if let Some(c) = icon {
@@ -228,6 +228,9 @@ pub fn draw(dis: &DRAWITEMSTRUCT) -> bool {
 }
 
 fn measure(hdc: HDC, s: &str, font: HFONT) -> i32 {
+    if s.is_empty() {
+        return 0; // an empty Vec's pointer isn't valid to hand to DrawTextW
+    }
     let w: Vec<u16> = s.encode_utf16().collect();
     let mut r = RECT { left: 0, top: 0, right: 10_000, bottom: 1000 };
     unsafe {

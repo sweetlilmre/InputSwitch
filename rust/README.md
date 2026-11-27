@@ -51,6 +51,8 @@ Measured on the same machine with the same monitors. Both builds were isolated w
 | `monitors.rs` | Enumeration (CCD + EDID), DDC/CI, capabilities parsing, switching |
 | `config.rs`, `matcher.rs`, `hotkey.rs` | Settings model and file, setup matching, hotkeys |
 | `theme.rs` | Light/dark palette (following Windows or the user's choice), accent colour, dark title bars and controls, surface colours, drawing helpers |
+| `monitor_list.rs` | The Monitors list as cards, like the C# app: icon, editable name, details, input chips, status pill, delete button |
+| `hotkey_list.rs` | The Hotkeys list as cards: key caps, action and monitor, Test / Edit / Delete buttons |
 | `dialog.rs` | Themed message boxes and confirmations (icon badge, heading, detail, buttons named after the action) |
 | `widgets.rs` | Owner-drawn rounded buttons, checkboxes and toggle switches (hover, pressed, icons) |
 | `ui.rs`, `sys.rs` | Win32 UI helpers, IDs, time, version, startup |

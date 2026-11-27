@@ -9,6 +9,8 @@
 
 use crate::config::{AppConfig, Binding, ProfileMonitor};
 use crate::ffi::*;
+use crate::hotkey_list;
+use crate::monitor_list;
 use crate::monitors::{self, MonitorInfo};
 use crate::ui::{self, Fonts};
 use crate::{editor, matcher, sys, theme, tray, widgets};
@@ -29,22 +31,17 @@ const ID_DELETE: i32 = 102;
 const ID_NAME: i32 = 103;
 const ID_ENABLED: i32 = 104;
 const ID_MONITORS: i32 = 105;
-const ID_RENAME: i32 = 106;
 const ID_DETECT: i32 = 107;
 const ID_ADD_CONNECTED: i32 = 108;
-const ID_REMOVE_MONITOR: i32 = 109;
 const ID_HOTKEYS: i32 = 110;
 const ID_ADD_HOTKEY: i32 = 111;
-const ID_EDIT_HOTKEY: i32 = 112;
-const ID_REMOVE_HOTKEY: i32 = 113;
-const ID_TEST_HOTKEY: i32 = 114;
 const ID_STARTUP: i32 = 115;
 const ID_NOTIFY: i32 = 116;
 const ID_DARK: i32 = 117;
 
 /// Client size at 96 DPI.
-const WIDTH: i32 = 1000;
-const HEIGHT: i32 = 700;
+const WIDTH: i32 = 1040;
+const HEIGHT: i32 = 740;
 const MIN_WIDTH: i32 = 960;
 const MIN_HEIGHT: i32 = 620;
 /// Height of a two-line item in the configurations list, at 96 DPI.
@@ -82,17 +79,16 @@ struct Controls {
     enabled: HWND,
     status: HWND,
     monitors_label: HWND,
+    monitors_hint: HWND,
+    /// The monitor cards (monitor_list).
     monitors: HWND,
-    rename: HWND,
     detect: HWND,
     add_connected: HWND,
-    remove_monitor: HWND,
     hotkeys_label: HWND,
+    hotkeys_hint: HWND,
+    /// The hotkey cards (hotkey_list).
     hotkeys: HWND,
     add_hotkey: HWND,
-    edit_hotkey: HWND,
-    remove_hotkey: HWND,
-    test_hotkey: HWND,
     activity: HWND,
     startup: HWND,
     notify: HWND,
@@ -113,6 +109,8 @@ struct Settings {
     current: HashMap<String, Option<u8>>,
     attempted: HashSet<String>,
     detecting: bool,
+    /// The banner's icon: a tick (connected, hotkeys on), a warning (hotkeys off) or info.
+    status_icon: StatusIcon,
     /// A detection asked for while one was running (Some(force)); it runs when that one finishes.
     detect_queued: Option<bool>,
     /// A typed name is waiting to be committed (the typing timer is running).
@@ -126,6 +124,13 @@ thread_local! {
 
 fn with<R>(f: impl FnOnce(&mut Settings) -> R) -> Option<R> {
     STATE.with(|s| s.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum StatusIcon {
+    Tick,
+    Warning,
+    Info,
 }
 
 enum After {
@@ -156,7 +161,7 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     STATE.with(|s| {
         *s.borrow_mut() = Some(Settings {
             hwnd, dpi, fonts, c, config, connected, active, sel: None,
-            current: HashMap::new(), attempted: HashSet::new(), detecting: false, detect_queued: None, typing: false, regions: Regions::default(),
+            current: HashMap::new(), attempted: HashSet::new(), detecting: false, detect_queued: None, status_icon: StatusIcon::Info, typing: false, regions: Regions::default(),
         })
     });
     with(|s| {
@@ -329,17 +334,14 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         enabled: widgets::checkbox(h, "Hotkeys on", ID_ENABLED, f, Banner),
         status: ui::label_on(h, "", n, Banner, false),
         monitors_label: ui::label_on(h, "Monitors", f.section, Card, false),
-        monitors: ui::listview(h, ID_MONITORS, LVS_EDITLABELS, 0, n),
-        rename: widgets::button(h, "Rename", ID_RENAME, Some(widgets::ICON_RENAME), f, Card),
+        monitors_hint: ui::label_on(h, "This configuration is used whenever these monitors are connected.", n, Card, true),
+        monitors: monitor_list::create(h, ID_MONITORS, dpi),
         detect: widgets::button(h, "Detect inputs", ID_DETECT, Some(widgets::ICON_REFRESH), f, Card),
         add_connected: widgets::button(h, "Add connected", ID_ADD_CONNECTED, Some(widgets::ICON_ADD), f, Card),
-        remove_monitor: widgets::button(h, "Remove", ID_REMOVE_MONITOR, Some(widgets::ICON_DELETE), f, Card),
         hotkeys_label: ui::label_on(h, "Hotkeys", f.section, Card, false),
-        hotkeys: ui::listview(h, ID_HOTKEYS, 0, 0, n),
+        hotkeys_hint: ui::label_on(h, "Switch to one input, toggle between two, or cycle through several.", n, Card, true),
+        hotkeys: hotkey_list::create(h, ID_HOTKEYS, dpi),
         add_hotkey: widgets::accent_button(h, "Add hotkey", ID_ADD_HOTKEY, Some(widgets::ICON_ADD), f, Card),
-        edit_hotkey: widgets::button(h, "Edit", ID_EDIT_HOTKEY, Some(widgets::ICON_EDIT), f, Card),
-        remove_hotkey: widgets::button(h, "Remove", ID_REMOVE_HOTKEY, Some(widgets::ICON_DELETE), f, Card),
-        test_hotkey: widgets::button(h, "Test", ID_TEST_HOTKEY, Some(widgets::ICON_PLAY), f, Card),
         activity: ui::label_on(h, "", f.small, Layer, true),
         startup: widgets::checkbox(h, "Start with Windows", ID_STARTUP, f, Layer),
         notify: widgets::checkbox(h, "Notify when the setup changes", ID_NOTIFY, f, Layer),
@@ -347,24 +349,7 @@ fn create_controls(h: HWND, f: &Fonts, dpi: u32) -> Controls {
         saved_note,
         close: widgets::button(h, "Close", IDCANCEL, None, f, Layer),
     };
-    let s = |v| ui::scale(v, dpi);
-    for (i, (title, width)) in [("Name", 170), ("Model", 80), ("Serial", 100), ("Status", 95), ("Current input", 105), ("Available inputs", 250)].iter().enumerate() {
-        ui::lv_add_column(c.monitors, i as i32, title, s(*width));
-    }
-    for (i, (title, width)) in [("Hotkey", 150), ("Monitor", 170), ("Action", 330)].iter().enumerate() {
-        ui::lv_add_column(c.hotkeys, i as i32, title, s(*width));
-    }
     c
-}
-
-/// Sizes a list view's last column to the width the other columns leave.
-fn fill_last_column(list: HWND, last: usize) {
-    unsafe {
-        let mut rc = RECT::default();
-        GetClientRect(list, &mut rc);
-        let used: i32 = (0..last).map(|i| SendMessageW(list, LVM_GETCOLUMNWIDTH, i, 0) as i32).sum();
-        SendMessageW(list, LVM_SETCOLUMNWIDTH, last, (rc.right - used).max(ui::scale(80, GetDpiForWindow(list).max(96))) as LPARAM);
-    }
 }
 
 /// Areas painted behind the controls (in physical pixels): the content layer, the status
@@ -380,21 +365,17 @@ struct Regions {
 impl Controls {
     fn all(&self) -> Vec<HWND> {
         vec![self.configs_label, self.profiles, self.new, self.delete, self.version, self.name_label, self.name, self.enabled,
-            self.status, self.monitors_label, self.monitors, self.rename, self.detect, self.add_connected, self.remove_monitor,
-            self.hotkeys_label, self.hotkeys, self.add_hotkey, self.edit_hotkey, self.remove_hotkey, self.test_hotkey,
+            self.status, self.monitors_label, self.monitors_hint, self.monitors, self.detect, self.add_connected,
+            self.hotkeys_label, self.hotkeys_hint, self.hotkeys, self.add_hotkey,
             self.activity, self.startup, self.notify, self.dark, self.saved_note, self.close]
     }
 
     /// The controls that only make sense with a configuration selected.
     fn detail(&self) -> Vec<HWND> {
-        vec![self.delete, self.name, self.enabled, self.monitors, self.rename, self.detect, self.add_connected,
-            self.remove_monitor, self.hotkeys, self.add_hotkey]
+        vec![self.delete, self.name, self.enabled, self.monitors, self.detect, self.add_connected,
+            self.hotkeys, self.add_hotkey]
     }
 
-    /// The buttons that act on the selected hotkey.
-    fn hotkey_actions(&self) -> [HWND; 3] {
-        [self.edit_hotkey, self.remove_hotkey, self.test_hotkey]
-    }
 }
 
 impl Settings {
@@ -434,7 +415,7 @@ impl Settings {
 
         // Status banner: the status on the left, "Hotkeys on" on the right.
         let banner = r(rx, 64, rw, 46);
-        p(c.status, rx + 16, 64 + 13, rw - 32 - 150, 20);
+        p(c.status, rx + 16 + 28, 64 + 13, rw - 32 - 28 - 150, 20);
         p(c.enabled, re - 16 - 130, 64 + 11, 130, 24);
 
         // Footer.
@@ -450,32 +431,34 @@ impl Settings {
         let top = 126;
         let end = bottom - 40;
         let gap = 16;
-        let monitors_h = (end - top - gap) * 45 / 100;
         let (cx, cw) = (rx + 16, rw - 32);
-        p(c.monitors_label, cx, top + 12, cw, 26);
-        p(c.monitors, cx, top + 44, cw, monitors_h - 44 - 12 - 32 - 12);
-        let by = top + monitors_h - 12 - 32;
-        p(c.rename, cx, by, 110, 32);
-        p(c.detect, cx + 118, by, 140, 32);
-        p(c.add_connected, cx + 266, by, 150, 32);
-        p(c.remove_monitor, cx + 424, by, 110, 32);
+        // Monitors: title and subtitle, the two buttons on the right (as in the C# app), then the
+        // cards. The card is as tall as the monitors need, leaving the Hotkeys card some room;
+        // beyond that the cards scroll. Their height depends on the width, so size that first.
+        let header = 66;
+        p(c.monitors, cx, top + header, cw, 10);
+        let want = header + monitor_list::content_height().max(40) + 16;
+        let monitors_h = want.min(end - top - gap - 200).max(header + 60);
+        p(c.monitors_label, cx, top + 12, cw - 310, 26);
+        p(c.monitors_hint, cx, top + 40, cw - 310, 20);
+        p(c.detect, cx + cw - 150 - 8 - 140, top + 16, 140, 32);
+        p(c.add_connected, cx + cw - 150, top + 16, 150, 32);
+        p(c.monitors, cx, top + header, cw, monitors_h - header - 16);
 
         let hy = top + monitors_h + gap;
-        let hotkeys_h = end - hy;
-        p(c.hotkeys_label, cx, hy + 12, cw, 26);
-        p(c.hotkeys, cx, hy + 44, cw, hotkeys_h - 44 - 12 - 32 - 12);
-        let by = end - 12 - 32;
-        p(c.add_hotkey, cx, by, 130, 32);
-        p(c.edit_hotkey, cx + 138, by, 100, 32);
-        p(c.remove_hotkey, cx + 246, by, 110, 32);
-        p(c.test_hotkey, cx + 364, by, 100, 32);
+        // Hotkeys: the same header (Add hotkey on the right), then the cards; the card is as tall
+        // as they need, up to the space left.
+        p(c.hotkeys, cx, hy + header, cw, 10);
+        let want = header + hotkey_list::content_height() + 16;
+        let hotkeys_h = want.min(end - hy).max(header + 50);
+        p(c.hotkeys_label, cx, hy + 12, cw - 160, 26);
+        p(c.hotkeys_hint, cx, hy + 40, cw - 160, 20);
+        p(c.add_hotkey, cx + cw - 130, hy + 16, 130, 32);
+        p(c.hotkeys, cx, hy + header, cw, hotkeys_h - header - 16);
 
         self.regions = Regions { layer, banner, cards: [r(rx, top, rw, monitors_h), r(rx, hy, rw, hotkeys_h)], name_frame };
-
-        // The last column fills whatever width is left (exactly, so there's no horizontal scroll bar).
-        fill_last_column(c.monitors, 5);
-        fill_last_column(c.hotkeys, 2);
-        unsafe { RedrawWindow(self.hwnd, core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE) };
+        // All children too: moved controls otherwise keep stale pixels copied from where they were.
+        unsafe { RedrawWindow(self.hwnd, core::ptr::null(), 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN) };
     }
 
     /// Paints the window background, the content layer, the cards, the banner and the name frame.
@@ -493,6 +476,17 @@ impl Settings {
             theme::round_rect(hdc, card, radius, p.card, Some(p.stroke));
         }
         theme::round_rect(hdc, g.banner, ui::scale(6, self.dpi), theme::color_of(theme::Surface::Banner), None);
+        // The banner's icon, coloured like the C# app's (green tick, amber warning, grey info).
+        let (glyph, colour) = match self.status_icon {
+            StatusIcon::Tick => ('\u{E73E}', theme::success_text()),
+            StatusIcon::Warning => ('\u{E7BA}', theme::caution_text()),
+            StatusIcon::Info => ('\u{E946}', p.text2),
+        };
+        let icon_font = ui::icon_font(self.dpi, 16);
+        let b = g.banner;
+        let icon = RECT { left: b.left + ui::scale(16, self.dpi), top: b.top, right: b.left + ui::scale(16 + 20, self.dpi), bottom: b.bottom };
+        theme::text(hdc, &glyph.to_string(), icon, icon_font, colour, DT_VCENTER | DT_SINGLELINE);
+        unsafe { DeleteObject(icon_font) };
         theme::round_rect(hdc, g.name_frame, ui::scale(4, self.dpi), p.control, Some(p.control_stroke));
     }
 
@@ -535,8 +529,8 @@ impl Settings {
     fn retheme(&mut self) {
         widgets::set_checked(self.c.dark, theme::palette().dark);
         theme::apply_window(self.hwnd);
-        theme::apply_control(self.c.monitors, theme::ControlKind::ListView);
-        theme::apply_control(self.c.hotkeys, theme::ControlKind::ListView);
+        monitor_list::retheme(self.c.monitors);
+        hotkey_list::retheme(self.c.hotkeys);
         theme::apply_control(self.c.profiles, theme::ControlKind::ListBox);
         theme::apply_control(self.c.name, theme::ControlKind::Edit);
         self.update_status();
@@ -553,6 +547,8 @@ impl Settings {
         for h in [self.c.configs_label, self.c.monitors_label, self.c.hotkeys_label] {
             unsafe { SendMessageW(h, WM_SETFONT, fonts.section as usize, 1) };
         }
+        monitor_list::set_dpi(dpi);
+        hotkey_list::set_dpi(dpi);
         for h in [self.c.activity, self.c.saved_note, self.c.version] {
             unsafe { SendMessageW(h, WM_SETFONT, fonts.small as usize, 1) };
         }
@@ -627,9 +623,8 @@ impl Settings {
             };
             ui::set_text(self.c.status, text);
             self.set_banner(theme::palette().neutral);
-            ui::lv_clear(self.c.monitors);
-            ui::lv_clear(self.c.hotkeys);
-            self.update_hotkey_buttons();
+            monitor_list::set_rows(Vec::new());
+            hotkey_list::set_rows(Vec::new());
             return;
         };
         let (name, enabled) = (self.config.profiles[i].name.clone(), self.config.profiles[i].enabled);
@@ -641,20 +636,21 @@ impl Settings {
         self.detect(false);
     }
 
-    fn update_status(&self) {
+    fn update_status(&mut self) {
         let Some(i) = self.sel else { return };
         let p = &self.config.profiles[i];
         let present = p.monitors.iter().filter(|m| self.is_connected(&m.monitor_id)).count();
         let colours = theme::palette();
-        let (text, banner) = if self.is_active(i) {
+        let (text, banner, icon) = if self.is_active(i) {
             if p.enabled {
-                (format!("✔  Connected now ({present} of {} monitors present). Hotkeys are active.", p.monitors.len()), colours.success)
+                (format!("Connected now ({present} of {} monitors present). Hotkeys are active.", p.monitors.len()), colours.success, StatusIcon::Tick)
             } else {
-                (format!("⚠  Connected now ({present} of {} monitors present). Turn hotkeys on to use them.", p.monitors.len()), colours.caution)
+                (format!("Connected now ({present} of {} monitors present). Turn hotkeys on to use them.", p.monitors.len()), colours.caution, StatusIcon::Warning)
             }
         } else {
-            ("Not connected now. Inputs can only be detected and tested while this setup is connected.".to_string(), colours.neutral)
+            ("Not connected now. Inputs can only be detected and tested while this setup is connected.".to_string(), colours.neutral, StatusIcon::Info)
         };
+        self.status_icon = icon;
         ui::set_text(self.c.status, &text);
         self.set_banner(banner);
     }
@@ -722,55 +718,58 @@ impl Settings {
 
     // -------------------------------------------------------------------------------- monitors
 
-    fn refresh_monitors(&self) {
-        ui::lv_clear(self.c.monitors);
+    fn refresh_monitors(&mut self) {
+        let rows = match self.sel {
+            None => Vec::new(),
+            Some(i) => self.config.profiles[i].monitors.iter().map(|m| {
+                let connected = self.is_connected(&m.monitor_id);
+                let current = self.current.get(&m.monitor_id.to_lowercase()).copied().flatten();
+                monitor_list::Row {
+                    id: m.monitor_id.clone(),
+                    name: m.name.clone(),
+                    details: match &m.serial {
+                        Some(s) if !s.is_empty() => format!("{} · S/N {s}", m.model),
+                        _ => m.model.clone(),
+                    },
+                    connected,
+                    chips: m.supported_inputs.iter().map(|&c| (monitors::short_name(c), current == Some(c))).collect(),
+                    hint: if !m.supported_inputs.is_empty() {
+                        String::new()
+                    } else if connected {
+                        "Inputs not detected yet".into()
+                    } else {
+                        "Connect this monitor to detect its inputs".into()
+                    },
+                }
+            }).collect(),
+        };
+        monitor_list::set_rows(rows);
+        self.layout();
+    }
+
+    /// A monitor's name box changed: keep it (unless blank) and save shortly.
+    fn rename_monitor(&mut self, row: usize) {
+        let (Some(i), Some(text)) = (self.sel, monitor_list::name_text(row)) else { return };
+        let text = text.trim();
+        if text.is_empty() || row >= self.config.profiles[i].monitors.len() {
+            return;
+        }
+        if self.config.profiles[i].monitors[row].name != text {
+            self.config.profiles[i].monitors[row].name = text.to_string();
+            self.commit_soon();
+        }
+    }
+
+    /// Leaving a monitor's name box: put back the saved name if it was left blank, and show the
+    /// new name in the hotkeys list.
+    fn finish_monitor_name(&mut self, row: usize) {
         let Some(i) = self.sel else { return };
-        for (row, m) in self.config.profiles[i].monitors.iter().enumerate() {
-            let connected = self.is_connected(&m.monitor_id);
-            let current = match self.current.get(&m.monitor_id.to_lowercase()) {
-                Some(Some(c)) => monitors::short_name(*c),
-                Some(None) => "no reply".into(),
-                None => String::new(),
-            };
-            let inputs = if !m.supported_inputs.is_empty() {
-                m.supported_inputs.iter().map(|&c| monitors::short_name(c)).collect::<Vec<_>>().join(", ")
-            } else if connected {
-                "not detected yet".into()
-            } else {
-                String::new()
-            };
-            ui::lv_add(self.c.monitors, &[m.name.clone(), m.model.clone(), m.serial.clone().unwrap_or_default(),
-                (if connected { "Connected" } else { "Not connected" }).into(), current, inputs], row as isize);
+        let Some(m) = self.config.profiles[i].monitors.get(row) else { return };
+        if monitor_list::name_text(row).is_some_and(|t| t.trim() != m.name) {
+            monitor_list::set_name_text(row, &m.name.clone());
         }
-    }
-
-    fn selected_monitor(&self) -> Option<usize> {
-        ui::lv_selected(self.c.monitors).map(|r| ui::lv_param(self.c.monitors, r) as usize)
-    }
-
-    fn start_rename(&self) {
-        let row = ui::lv_selected(self.c.monitors).unwrap_or(0);
-        if ui::lv_count(self.c.monitors) > 0 {
-            unsafe {
-                SetFocus(self.c.monitors);
-                SendMessageW(self.c.monitors, LVM_EDITLABELW, row as usize, 0);
-            }
-        }
-    }
-
-    fn finish_rename(&mut self, row: i32, text: String) -> bool {
-        let text = text.trim().to_string();
-        let Some(i) = self.sel else { return false };
-        let index = ui::lv_param(self.c.monitors, row) as usize;
-        if text.is_empty() || index >= self.config.profiles[i].monitors.len() {
-            return false;
-        }
-        self.config.profiles[i].monitors[index].name = text;
-        self.commit();
         self.refresh_hotkeys();
-        true
     }
-
     fn add_connected(&mut self) {
         let Some(i) = self.sel else { return };
         let missing: Vec<MonitorInfo> = self.connected.iter()
@@ -792,8 +791,11 @@ impl Settings {
         self.detect(false);
     }
 
-    fn remove_monitor(&mut self) {
-        let (Some(i), Some(index)) = (self.sel, self.selected_monitor()) else { return };
+    fn remove_monitor(&mut self, index: usize) {
+        let Some(i) = self.sel else { return };
+        if index >= self.config.profiles[i].monitors.len() {
+            return;
+        }
         let p = &self.config.profiles[i];
         let m = &p.monitors[index];
         let used = p.bindings.iter().filter(|b| b.monitor_id.eq_ignore_ascii_case(&m.monitor_id)).count();
@@ -895,29 +897,21 @@ impl Settings {
 
     // -------------------------------------------------------------------------------- hotkeys
 
-    fn refresh_hotkeys(&self) {
-        ui::lv_clear(self.c.hotkeys);
-        let Some(i) = self.sel else { return };
-        let p = &self.config.profiles[i];
-        for (row, b) in p.bindings.iter().enumerate() {
-            let monitor = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "(removed monitor)".into());
-            ui::lv_add(self.c.hotkeys, &[b.hotkey.display(), monitor, monitors::describe_action(&b.inputs)], row as isize);
-        }
-        self.update_hotkey_buttons();
+    fn refresh_hotkeys(&mut self) {
+        let rows = match self.sel {
+            None => Vec::new(),
+            Some(i) => {
+                let p = &self.config.profiles[i];
+                p.bindings.iter().map(|b| hotkey_list::Row {
+                    keys: b.hotkey.display().split(" + ").map(str::to_string).collect(),
+                    action: monitors::describe_action(&b.inputs),
+                    monitor: p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "(removed monitor)".into()),
+                }).collect()
+            }
+        };
+        hotkey_list::set_rows(rows);
+        self.layout();
     }
-
-    /// Edit, Remove and Test are only available while a hotkey is selected.
-    fn update_hotkey_buttons(&self) {
-        let on = self.sel.is_some() && ui::lv_selected(self.c.hotkeys).is_some();
-        for h in self.c.hotkey_actions() {
-            ui::enable(h, on);
-        }
-    }
-
-    fn selected_binding(&self) -> Option<usize> {
-        ui::lv_selected(self.c.hotkeys).map(|r| ui::lv_param(self.c.hotkeys, r) as usize)
-    }
-
     fn add_hotkey(&mut self) {
         let Some(i) = self.sel else { return };
         if self.config.profiles[i].monitors.is_empty() {
@@ -938,8 +932,11 @@ impl Settings {
         self.refresh_hotkeys();
     }
 
-    fn edit_hotkey(&mut self) {
-        let (Some(i), Some(index)) = (self.sel, self.selected_binding()) else { return };
+    fn edit_hotkey(&mut self, index: usize) {
+        let Some(i) = self.sel else { return };
+        if index >= self.config.profiles[i].bindings.len() {
+            return;
+        }
         let existing: Binding = self.config.profiles[i].bindings[index].clone();
         let Some(b) = self.run_editor(i, Some(&existing)) else { return };
         self.config.profiles[i].bindings[index] = b;
@@ -947,8 +944,11 @@ impl Settings {
         self.refresh_hotkeys();
     }
 
-    fn remove_hotkey(&mut self) {
-        let (Some(i), Some(index)) = (self.sel, self.selected_binding()) else { return };
+    fn remove_hotkey(&mut self, index: usize) {
+        let Some(i) = self.sel else { return };
+        if index >= self.config.profiles[i].bindings.len() {
+            return;
+        }
         let p = &self.config.profiles[i];
         let b = &p.bindings[index];
         let monitor = p.monitor(&b.monitor_id).map(|m| m.name.clone()).unwrap_or_else(|| "the monitor".into());
@@ -970,8 +970,11 @@ impl Settings {
         result
     }
 
-    fn test_hotkey(&mut self) {
-        let (Some(i), Some(index)) = (self.sel, self.selected_binding()) else { return };
+    fn test_hotkey(&mut self, index: usize) {
+        let Some(i) = self.sel else { return };
+        if index >= self.config.profiles[i].bindings.len() {
+            return;
+        }
         let b = self.config.profiles[i].bindings[index].clone();
         let Some(m) = self.connected_monitor(&b.monitor_id) else {
             ui::set_text(self.c.activity, "That monitor is not connected.");
@@ -996,14 +999,27 @@ impl Settings {
             (ID_DELETE, BN_CLICKED) => self.delete_profile(),
             (ID_NAME, EN_CHANGE) => self.rename_profile(),
             (ID_ENABLED, BN_CLICKED) => self.toggle_enabled(),
-            (ID_RENAME, BN_CLICKED) => self.start_rename(),
             (ID_DETECT, BN_CLICKED) => self.detect(true),
             (ID_ADD_CONNECTED, BN_CLICKED) => self.add_connected(),
-            (ID_REMOVE_MONITOR, BN_CLICKED) => self.remove_monitor(),
+            (id, EN_CHANGE) if (monitor_list::NAME_ID..monitor_list::NAME_ID + monitor_list::MAX_ROWS).contains(&id) => {
+                self.rename_monitor((id - monitor_list::NAME_ID) as usize)
+            }
+            (id, EN_KILLFOCUS) if (monitor_list::NAME_ID..monitor_list::NAME_ID + monitor_list::MAX_ROWS).contains(&id) => {
+                self.finish_monitor_name((id - monitor_list::NAME_ID) as usize)
+            }
+            (id, BN_CLICKED) if (monitor_list::REMOVE_ID..monitor_list::REMOVE_ID + monitor_list::MAX_ROWS).contains(&id) => {
+                self.remove_monitor((id - monitor_list::REMOVE_ID) as usize)
+            }
             (ID_ADD_HOTKEY, BN_CLICKED) => self.add_hotkey(),
-            (ID_EDIT_HOTKEY, BN_CLICKED) => self.edit_hotkey(),
-            (ID_REMOVE_HOTKEY, BN_CLICKED) => self.remove_hotkey(),
-            (ID_TEST_HOTKEY, BN_CLICKED) => self.test_hotkey(),
+            (id, BN_CLICKED) if (hotkey_list::TEST_ID..hotkey_list::TEST_ID + hotkey_list::MAX_ROWS).contains(&id) => {
+                self.test_hotkey((id - hotkey_list::TEST_ID) as usize)
+            }
+            (id, BN_CLICKED) if (hotkey_list::EDIT_ID..hotkey_list::EDIT_ID + hotkey_list::MAX_ROWS).contains(&id) => {
+                self.edit_hotkey((id - hotkey_list::EDIT_ID) as usize)
+            }
+            (id, BN_CLICKED) if (hotkey_list::REMOVE_ID..hotkey_list::REMOVE_ID + hotkey_list::MAX_ROWS).contains(&id) => {
+                self.remove_hotkey((id - hotkey_list::REMOVE_ID) as usize)
+            }
             (ID_STARTUP, BN_CLICKED) => self.set_startup(),
             (ID_DARK, BN_CLICKED) => {
                 self.config.theme = if widgets::checked(self.c.dark) { crate::config::Theme::Dark } else { crate::config::Theme::Light };
@@ -1021,31 +1037,8 @@ impl Settings {
         After::Nothing
     }
 
-    fn notify(&mut self, l: LPARAM) -> Option<LRESULT> {
-        let hdr = unsafe { &*(l as *const NMHDR) };
-        match (hdr.idFrom as i32, hdr.code) {
-            (ID_MONITORS, LVN_ENDLABELEDITW) => {
-                let info = unsafe { &*(l as *const NMLVDISPINFOW) };
-                if info.item.pszText.is_null() {
-                    return Some(0);
-                }
-                let text = unsafe {
-                    let mut n = 0;
-                    while *info.item.pszText.add(n) != 0 { n += 1; }
-                    String::from_utf16_lossy(std::slice::from_raw_parts(info.item.pszText, n))
-                };
-                Some(self.finish_rename(info.item.iItem, text) as LRESULT)
-            }
-            (ID_HOTKEYS, NM_DBLCLK) => {
-                self.edit_hotkey();
-                Some(0)
-            }
-            (ID_HOTKEYS, LVN_ITEMCHANGED) => {
-                self.update_hotkey_buttons();
-                None
-            }
-            _ => None,
-        }
+    fn notify(&mut self, _l: LPARAM) -> Option<LRESULT> {
+        None // the lists are custom panels now; nothing sends list notifications
     }
 
     /// Hands a copy of the configuration to the tray app, which saves and applies it.

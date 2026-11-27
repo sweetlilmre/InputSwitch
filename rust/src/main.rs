@@ -9,8 +9,10 @@ mod editor;
 mod ffi;
 mod hotkey;
 mod hotkey_box;
+mod hotkey_list;
 mod json;
 mod matcher;
+mod monitor_list;
 mod monitors;
 mod reserved;
 mod settings;
@@ -24,6 +26,12 @@ use ffi::*;
 use std::fmt::Write as _;
 
 fn main() {
+    // A windowed app has nowhere to print a panic, so a crash would be silent: write it to
+    // crash.txt in the settings folder instead.
+    std::panic::set_hook(Box::new(|info| {
+        let text = format!("{}\n\n{info}\n\n{}", sys::display_version(), std::backtrace::Backtrace::force_capture());
+        let _ = std::fs::write(config::dir().join("crash.txt"), text);
+    }));
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a.eq_ignore_ascii_case("--diagnose")) {
         diagnose(args.get(1).map(String::as_str));

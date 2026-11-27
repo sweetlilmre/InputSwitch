@@ -21,6 +21,8 @@ pub enum Surface {
     Card,
     /// The status banner, whose colour changes with the state.
     Banner,
+    /// A monitor's card inside the Monitors card (ControlFillColorDefault over the card).
+    Row,
 }
 
 #[derive(Clone, Copy)]
@@ -271,7 +273,18 @@ pub fn color_of(surface: Surface) -> u32 {
         Surface::Layer => p.layer,
         Surface::Card => p.card,
         Surface::Banner => BANNER.with(|b| b.get()),
+        Surface::Row => if p.dark { mix(p.card, rgb(255, 255, 255), 0.06) } else { rgb(255, 255, 255) },
     }
+}
+
+/// SystemFillColorSuccess: the green of ticks and status dots.
+pub fn success_text() -> u32 {
+    if palette().dark { rgb(108, 203, 95) } else { rgb(15, 123, 15) }
+}
+
+/// SystemFillColorCaution: the amber of warning icons.
+pub fn caution_text() -> u32 {
+    if palette().dark { rgb(252, 225, 0) } else { rgb(157, 93, 0) }
 }
 
 pub fn set_banner(color: u32) {
@@ -334,6 +347,9 @@ pub fn fill(hdc: HDC, r: RECT, color: u32) {
 
 /// Draws text in a rectangle.
 pub fn text(hdc: HDC, s: &str, mut r: RECT, font: HFONT, color: u32, format: u32) {
+    if s.is_empty() {
+        return;
+    }
     let w: Vec<u16> = s.encode_utf16().collect();
     unsafe {
         let old = SelectObject(hdc, font);
