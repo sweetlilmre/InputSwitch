@@ -113,6 +113,8 @@ struct Settings {
     current: HashMap<String, Option<u8>>,
     attempted: HashSet<String>,
     detecting: bool,
+    /// A detection asked for while one was running (Some(force)); it runs when that one finishes.
+    detect_queued: Option<bool>,
     /// A typed name is waiting to be committed (the typing timer is running).
     typing: bool,
     regions: Regions,
@@ -154,7 +156,7 @@ pub fn open(config: AppConfig, connected: Vec<MonitorInfo>, active: Option<Strin
     STATE.with(|s| {
         *s.borrow_mut() = Some(Settings {
             hwnd, dpi, fonts, c, config, connected, active, sel: None,
-            current: HashMap::new(), attempted: HashSet::new(), detecting: false, typing: false, regions: Regions::default(),
+            current: HashMap::new(), attempted: HashSet::new(), detecting: false, detect_queued: None, typing: false, regions: Regions::default(),
         })
     });
     with(|s| {
@@ -775,6 +777,7 @@ impl Settings {
             return;
         }
         for m in missing {
+            self.attempted.remove(&m.id.to_lowercase()); // always read what was just added
             self.config.profiles[i].monitors.push(ProfileMonitor {
                 monitor_id: m.id.clone(), name: m.display_name().to_string(), model: m.model.clone(), serial: m.serial.clone(), supported_inputs: Vec::new(),
             });
@@ -809,6 +812,7 @@ impl Settings {
     fn detect(&mut self, force: bool) {
         let Some(i) = self.sel else { return };
         if self.detecting {
+            self.detect_queued = Some(force || self.detect_queued.unwrap_or(false));
             return;
         }
         let targets: Vec<(String, MonitorInfo)> = self.config.profiles[i].monitors.iter()
@@ -864,6 +868,9 @@ impl Settings {
                     } else {
                         "Inputs detected."
                     });
+                    if let Some(force) = self.detect_queued.take() {
+                        self.detect(force);
+                    }
                 }
                 Bg::Tested { id, result } => {
                     match result {
