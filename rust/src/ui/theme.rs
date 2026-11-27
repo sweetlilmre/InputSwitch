@@ -320,7 +320,8 @@ pub fn ctl_color(msg: u32, hdc: HDC, control: HWND) -> Option<LRESULT> {
             let secondary = style.is_some_and(|s| s.secondary);
             (color_of(style.map_or(Surface::Window, |s| s.surface)), if secondary { p.text2 } else { p.text })
         }
-        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (style.map_or(p.control, |s| color_of(s.surface)), p.text),
+        WM_CTLCOLOREDIT => (style.map_or(p.field, |s| color_of(s.surface)), p.text),
+        WM_CTLCOLORLISTBOX => (style.map_or(p.control, |s| color_of(s.surface)), p.text),
         _ => return None,
     };
     Some(colour_control(hdc, fg, bg))

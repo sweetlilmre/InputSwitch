@@ -215,9 +215,12 @@ impl Editor {
         let p = theme::palette();
         draw::fill(hdc, draw::client_rect(self.hwnd), p.window);
         for &(frame, is_hotkey) in &self.frames {
-            let fill = if is_hotkey { key_box::background() } else { p.control };
-            let border = if is_hotkey && key_box::is_listening() { p.accent } else { p.control_stroke };
-            draw::round_rect(hdc, frame, ui::scale(4, self.dpi), fill, Some(border));
+            if is_hotkey {
+                let border = if key_box::is_listening() { p.accent } else { p.control_stroke };
+                draw::round_rect(hdc, frame, ui::scale(4, self.dpi), key_box::background(), Some(border));
+            } else {
+                widgets::text_box(hdc, frame, self.dpi, false);
+            }
         }
     }
 

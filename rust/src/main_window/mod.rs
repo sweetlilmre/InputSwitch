@@ -285,6 +285,7 @@ impl MainWindow {
             (ID_NEW, BN_CLICKED) => self.new_from_current(),
             (ID_DELETE, BN_CLICKED) => self.delete_profile(),
             (ID_NAME, EN_CHANGE) => self.rename_profile(),
+            (ID_NAME, EN_SETFOCUS | EN_KILLFOCUS) => self.repaint_name_frame(),
             (ID_ENABLED, BN_CLICKED) => self.toggle_enabled(),
             (ID_DETECT, BN_CLICKED) => self.detect(true),
             (ID_ADD_CONNECTED, BN_CLICKED) => self.add_connected(),

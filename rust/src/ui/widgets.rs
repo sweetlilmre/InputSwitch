@@ -70,6 +70,18 @@ pub fn switch(parent: HWND, text: &str, id: i32, fonts: &Fonts, surface: Surface
     create(parent, text, id, Kind::Switch, None, fonts, surface)
 }
 
+/// Paints the frame behind a borderless edit box, as a Fluent text box: a faint border and a
+/// brighter bottom line, which turns accent-coloured and thicker while the box has focus. The edit
+/// box itself sits inside, with the field colour (see [`theme::ctl_color`]).
+pub fn text_box(hdc: HDC, frame: RECT, dpi: u32, focused: bool) {
+    let p = theme::palette();
+    let s = |v| super::scale(v, dpi);
+    draw::round_rect(hdc, frame, s(4), p.field, Some(p.field_stroke));
+    let line = if focused { s(2) } else { 1 };
+    let underline = RECT { left: frame.left + s(3), top: frame.bottom - line, right: frame.right - s(3), bottom: frame.bottom };
+    draw::fill(hdc, underline, if focused { p.accent } else { p.field_underline });
+}
+
 /// Updates the fonts after a DPI change.
 pub fn set_fonts(h: HWND, fonts: &Fonts) {
     INFO.with(|i| {

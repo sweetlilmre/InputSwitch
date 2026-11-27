@@ -199,11 +199,12 @@ impl MainWindow {
 
         // The two cards, each with a title, a subtitle and buttons on the right (as in the C#
         // app), then its cards. Each is as tall as its cards need (the cards' height depends on
-        // the width, so that's set first); beyond that they scroll. Monitors leaves room for Hotkeys.
+        // the width, so that's set first, keeping the panel's height: resizing it when nothing
+        // changed would repaint every card); beyond that they scroll. Monitors leaves room for Hotkeys.
         let (top, end, gap) = (126, bottom - 40, 16);
         let (cx, cw) = (rx + CARD_PAD, rw - 2 * CARD_PAD);
         let card_height = |panel: HWND, y: i32, max: i32| {
-            p(panel, cx, y + CARD_HEADER, cw, 10);
+            ui::place(panel, sc(cx), sc(y + CARD_HEADER), sc(cw), window_height(panel));
             (CARD_HEADER + card_panel_height(panel) + CARD_PAD).min(max)
         };
 
@@ -250,7 +251,13 @@ impl MainWindow {
         };
         let icon = RECT { left: g.banner.left + s(16), right: g.banner.left + s(16 + 20), ..g.banner };
         draw::glyph(hdc, glyph, icon, self.fonts.icon_16, colour, DT_VCENTER);
-        draw::round_rect(hdc, g.name_frame, s(4), p.control, Some(p.control_stroke));
+        widgets::text_box(hdc, g.name_frame, self.dpi, unsafe { GetFocus() } == self.c.name);
+    }
+
+    /// The name box's frame shows whether it has focus.
+    pub(super) fn repaint_name_frame(&self) {
+        let r = self.regions.name_frame;
+        unsafe { RedrawWindow(self.hwnd, &r, 0, RDW_INVALIDATE | RDW_ERASE) };
     }
 
     /// Draws one configuration in the list: an icon, the name, and its status underneath.
@@ -305,6 +312,13 @@ impl MainWindow {
         ui::place_rect(self.hwnd, suggested);
         self.layout();
     }
+}
+
+/// A window's current height, in pixels.
+fn window_height(h: HWND) -> i32 {
+    let mut r = RECT::default();
+    unsafe { GetWindowRect(h, &mut r) };
+    r.height()
 }
 
 /// A card panel's height at 96 DPI, at least enough for one line.

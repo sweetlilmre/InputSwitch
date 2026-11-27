@@ -96,21 +96,33 @@ pub fn partial_display(mods: u8) -> String {
     parts.join(" + ")
 }
 
-/// .NET `Keys` names (first entry per key is the one written; extra entries are accepted aliases).
+/// Every named .NET `Keys` value outside the digit, letter, number-pad and F-key ranges, so
+/// any hotkey the C# app records reads back. The first name for a key is the one written;
+/// the others are accepted aliases.
 const KEY_NAMES: &[(u16, &str)] = &[
-    (0x08, "Back"), (0x09, "Tab"), (0x0D, "Return"), (0x0D, "Enter"), (0x13, "Pause"), (0x1B, "Escape"),
+    (0x03, "Cancel"), (0x08, "Back"), (0x09, "Tab"), (0x0A, "LineFeed"), (0x0C, "Clear"), (0x0D, "Return"), (0x0D, "Enter"),
+    (0x13, "Pause"), (0x14, "Capital"), (0x14, "CapsLock"),
+    (0x15, "KanaMode"), (0x15, "HangulMode"), (0x15, "HanguelMode"), (0x17, "JunjaMode"), (0x18, "FinalMode"),
+    (0x19, "HanjaMode"), (0x19, "KanjiMode"), (0x1B, "Escape"),
+    (0x1C, "IMEConvert"), (0x1D, "IMENonconvert"), (0x1E, "IMEAccept"), (0x1E, "IMEAceept"), (0x1F, "IMEModeChange"),
     (0x20, "Space"), (0x21, "PageUp"), (0x21, "Prior"), (0x22, "PageDown"), (0x22, "Next"), (0x23, "End"),
-    (0x24, "Home"), (0x25, "Left"), (0x26, "Up"), (0x27, "Right"), (0x28, "Down"), (0x2C, "PrintScreen"),
-    (0x2C, "Snapshot"), (0x2D, "Insert"), (0x2E, "Delete"), (0x6A, "Multiply"), (0x6B, "Add"),
-    (0x6C, "Separator"), (0x6D, "Subtract"), (0x6E, "Decimal"), (0x6F, "Divide"), (0x90, "NumLock"),
-    (0x91, "Scroll"), (0xAD, "VolumeMute"), (0xAE, "VolumeDown"), (0xAF, "VolumeUp"), (0xB0, "MediaNextTrack"),
-    (0xB1, "MediaPreviousTrack"), (0xB2, "MediaStop"), (0xB3, "MediaPlayPause"), (0xBA, "OemSemicolon"),
-    (0xBA, "Oem1"), (0xBB, "Oemplus"), (0xBC, "Oemcomma"), (0xBD, "OemMinus"), (0xBE, "OemPeriod"),
+    (0x24, "Home"), (0x25, "Left"), (0x26, "Up"), (0x27, "Right"), (0x28, "Down"), (0x29, "Select"),
+    (0x2A, "Print"), (0x2B, "Execute"), (0x2C, "PrintScreen"), (0x2C, "Snapshot"), (0x2D, "Insert"), (0x2E, "Delete"),
+    (0x2F, "Help"), (0x5D, "Apps"), (0x5F, "Sleep"),
+    (0x6A, "Multiply"), (0x6B, "Add"), (0x6C, "Separator"), (0x6D, "Subtract"), (0x6E, "Decimal"), (0x6F, "Divide"),
+    (0x90, "NumLock"), (0x91, "Scroll"),
+    (0xA6, "BrowserBack"), (0xA7, "BrowserForward"), (0xA8, "BrowserRefresh"), (0xA9, "BrowserStop"),
+    (0xAA, "BrowserSearch"), (0xAB, "BrowserFavorites"), (0xAC, "BrowserHome"),
+    (0xAD, "VolumeMute"), (0xAE, "VolumeDown"), (0xAF, "VolumeUp"), (0xB0, "MediaNextTrack"),
+    (0xB1, "MediaPreviousTrack"), (0xB2, "MediaStop"), (0xB3, "MediaPlayPause"),
+    (0xB4, "LaunchMail"), (0xB5, "SelectMedia"), (0xB6, "LaunchApplication1"), (0xB7, "LaunchApplication2"),
+    (0xBA, "OemSemicolon"), (0xBA, "Oem1"), (0xBB, "Oemplus"), (0xBC, "Oemcomma"), (0xBD, "OemMinus"), (0xBE, "OemPeriod"),
     (0xBF, "OemQuestion"), (0xBF, "Oem2"), (0xC0, "Oemtilde"), (0xC0, "Oem3"), (0xDB, "OemOpenBrackets"),
     (0xDB, "Oem4"), (0xDC, "OemPipe"), (0xDC, "Oem5"), (0xDD, "OemCloseBrackets"), (0xDD, "Oem6"),
-    (0xDE, "OemQuotes"), (0xDE, "Oem7"), (0xE2, "OemBackslash"), (0xE2, "Oem102"),
+    (0xDE, "OemQuotes"), (0xDE, "Oem7"), (0xDF, "Oem8"), (0xE2, "OemBackslash"), (0xE2, "Oem102"),
+    (0xE5, "ProcessKey"), (0xE7, "Packet"), (0xF6, "Attn"), (0xF7, "Crsel"), (0xF8, "Exsel"), (0xF9, "EraseEof"),
+    (0xFA, "Play"), (0xFB, "Zoom"), (0xFC, "NoName"), (0xFD, "Pa1"), (0xFE, "OemClear"),
 ];
-
 fn key_name(vk: u16) -> Option<&'static str> {
     match vk {
         0x30..=0x39 => Some(["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9"][(vk - 0x30) as usize]),
@@ -196,5 +208,16 @@ mod tests {
         assert_eq!(Hotkey::from_json(&csharp), hk(CONTROL | SHIFT, 0x31));
         let next = crate::json::parse(r#"{"Modifiers":"Alt","Key":"Next"}"#).unwrap();
         assert_eq!(Hotkey::from_json(&next).vk, 0x22);
+    }
+
+    #[test]
+    fn reads_every_key_the_csharp_app_can_write() {
+        for (name, vk) in [("Apps", 0x5D), ("CapsLock", 0x14), ("Capital", 0x14), ("Cancel", 0x03), ("BrowserHome", 0xAC),
+            ("LaunchMail", 0xB4), ("Oem8", 0xDF), ("Sleep", 0x5F), ("OemClear", 0xFE), ("93", 93)] {
+            assert_eq!(parse_key(name), vk, "{name}");
+        }
+        // Written back under a name C# reads.
+        assert_eq!(key_name(0x5D), Some("Apps"));
+        assert_eq!(key_name(0x14), Some("Capital"));
     }
 }

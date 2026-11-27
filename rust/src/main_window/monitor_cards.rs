@@ -196,12 +196,7 @@ impl Cards for MonitorCards {
             let icon = rect(card.left + s(PAD_X), name.top, s(ICON), s(ICON + 4));
             draw::glyph(hdc, widgets::ICON_MONITOR, icon, cx.fonts.icon_28, dim(p.text), 0);
 
-            // A Fluent text box: faint border and a brighter bottom line, accent and thicker when focused.
-            draw::round_rect(hdc, name, s(4), p.field, Some(p.field_stroke));
-            let focused = c.name == focus;
-            let line = if focused { s(2) } else { 1 };
-            let underline = RECT { left: name.left + s(3), top: name.bottom - line, right: name.right - s(3), bottom: name.bottom };
-            draw::fill(hdc, underline, if focused { p.accent } else { p.field_underline });
+            widgets::text_box(hdc, name, cx.dpi, c.name == focus);
 
             let pill = up(c.pill);
             let details = RECT { left: name.left + s(2), top: name.bottom + s(4), right: pill.left - s(12), bottom: name.bottom + s(4 + LINE_H) };
